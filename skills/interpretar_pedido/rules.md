@@ -35,4 +35,14 @@ Sempre mostre no formato: `Quantidade (peso aproximado)`. Se o cliente pedir em 
 - Só pergunte se houver pedido de quantidade diferente ou se 20 unidades estiver indisponível.
 
 ## 7. Tamanhos e Atributos
-- Palavras como "grande", "pequeno", "médio", "azul", "vermelho", "tradicional", "original" são atributos. Em muitos casos ajudam no match, mas não definem o produto sozinhos.
+## 8. Itens Genéricos (Padrão de Sistema)
+Se o cliente pedir um item de forma genérica sem especificar tipo/marca e houver várias opções no mercado, assuma os seguintes padrões (NÃO pergunte qual a preferência, escolha direto):
+- **Macarrão**: Assuma Espaguete comum médio (ex: Espaguete Ovos ou Sêmola).
+- **Leite**: Assuma UHT Integral de caixinha (qualquer marca com bom preço/disponibilidade).
+- **Açúcar**: Assuma Açúcar Cristal 1kg (qualquer marca).
+- **Óleo**: Assuma Óleo de Soja 900ml.
+- **Feijão**: Assuma Feijão Carioca 1kg.
+- **Arroz**: Assuma Arroz Branco Tipo 1 (1kg).
+- **Café**: Assuma Café Torrado e Moído Tradicional 250g.
+- **Ovos**: Assuma "Cartela 20 unidades Branco" (ou 30 se 20 não existir).
+- Se houver outros genéricos: escolha o menor pacote ou a versão tradicional mais comum.
