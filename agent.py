@@ -602,7 +602,7 @@ def _is_close_intent(text: str) -> bool:
     return any(re.search(p, t) for p in patterns)
 
 
-def _sanitize_premature_checkout(response: str) -> str:
+def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
     if not response:
         return response
     lines = [ln for ln in (response or "").splitlines() if ln.strip()]
@@ -624,8 +624,24 @@ def _sanitize_premature_checkout(response: str) -> str:
             continue
         kept.append(ln)
     out = "\n".join(kept).strip()
+
+    # Verificamos se há itens no carrinho para decidir o follow-up (evita perguntar "deseja mais" no início)
+    cart_has_items = False
+    if phone:
+        try:
+            from tools.redis_tools import get_cart_items
+            items = get_cart_items(phone)
+            cart_has_items = len(items or []) > 0
+        except Exception:
+            pass
+
     if "deseja mais alguma coisa" not in out.lower():
-        out = (out + "\n\nDeseja mais alguma coisa?").strip()
+        if cart_has_items:
+            out = (out + "\n\nDeseja mais alguma coisa?").strip()
+        elif "?" not in out:
+            # Se o carrinho estiver vazio e o agente não fez uma pergunta, adicionamos um "Como posso ajudar?"
+            out = (out + "\n\nComo posso te ajudar hoje?").strip()
+            
     return out
 
 # Orquestrador removido
@@ -674,7 +690,7 @@ def vendedor_node(state: AgentState) -> dict:
             last_user_text = _message_content_to_text(msg.content)
             break
     if last_user_text and not _is_close_intent(last_user_text):
-        response = _sanitize_premature_checkout(response)
+        response = _sanitize_premature_checkout(response, state["phone"])
 
     logger.info(f"👩‍💼 [VENDEDOR] Resposta: {response[:100]}...")
 
