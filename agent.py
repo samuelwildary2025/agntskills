@@ -823,20 +823,50 @@ def vendedor_node(state: AgentState) -> dict:
     # ConfiguraÃ§Ã£o
     config = {
         "configurable": {"thread_id": state["phone"]},
-        "recursion_limit": 50
+        # Listas longas podem exigir muitas chamadas de tool (busca + add item).
+        "recursion_limit": 140,
     }
     
     result = agent.invoke({"messages": state["messages"]}, config)
     response = _extract_response(result)
 
-    # Evita vazar mensagem tÃ©cnica do executor para o cliente.
+    # Evita vazar mensagem técnica do executor para o cliente.
     low = (response or "").lower()
-    if "need more steps to process this request" in low:
-        logger.warning("âš ï¸ Resposta tÃ©cnica por limite de passos detectada; aplicando fallback amigÃ¡vel.")
-        response = (
-            "Entendi. Vou seguir com isso agora: 1 cartela de Danone Ninho "
-            "(iogurte polpa). Confirmo jÃ¡ no seu pedido."
-        )
+    if (
+        "need more steps to process this request" in low
+        or "maximum recursion" in low
+        or "recursion limit" in low
+    ):
+        logger.warning("⚠️ Limite de passos detectado; aplicando fallback neutro com base no carrinho.")
+        try:
+            items = get_cart_items(state["phone"]) or []
+            if items:
+                subtotal = Decimal("0")
+                linhas = []
+                for item in items[:30]:
+                    nome = str(item.get("produto", "Item"))
+                    qtd = Decimal(str(item.get("quantidade", 1) or 1))
+                    preco = Decimal(str(item.get("preco", 0) or 0))
+                    total_linha = (qtd * preco).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    subtotal += total_linha
+                    qtd_txt = int(qtd) if qtd == int(qtd) else float(qtd)
+                    linhas.append(f"- {qtd_txt} {nome} - R$ {float(total_linha):.2f}")
+                subtotal = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                response = (
+                    "Estou finalizando o processamento da sua lista. Até aqui ficou:\n"
+                    + "\n".join(linhas)
+                    + f"\nTotal estimado: R$ {float(subtotal):.2f}."
+                )
+            else:
+                response = (
+                    "Recebi sua lista, mas houve instabilidade no processamento automático agora. "
+                    "Vou continuar daqui sem alterar o que você pediu."
+                )
+        except Exception:
+            response = (
+                "Recebi sua lista, mas houve instabilidade no processamento automático agora. "
+                "Vou continuar daqui sem alterar o que você pediu."
+            )
 
     # Guard rail: se o cliente nÃ£o pediu para fechar, bloqueia pergunta de
     # endereÃ§o/pagamento na mesma resposta de adiÃ§Ã£o.
