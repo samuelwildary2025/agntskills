@@ -205,10 +205,9 @@ def ver_pedido_tool(telefone: str) -> str:
         preco = item.get("preco", 0)
         unidades = item.get("unidades", 0)
         
-             qtd_display = int(qtd) if qtd == int(qtd) else qtd
-             lines.append(f"{i}. {qtd_display}x {nome} - R$ {preco:.2f}/un")
+        qtd_display = int(qtd) if qtd == int(qtd) else qtd
+        lines.append(f"{i}. {qtd_display}x {nome} - R$ {preco:.2f}/un")
     
-    return "\n".join(lines)
     return "\n".join(lines)
 
 @tool
