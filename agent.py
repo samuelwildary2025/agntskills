@@ -720,8 +720,31 @@ def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
     return out
 
 
-def _parse_brl_amount(value: str) -> Decimal:
-    raw = str(value or "").strip().replace(".", "").replace(",", ".")
+def _parse_brl_amount(value: Any) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            return Decimal(str(value))
+        except Exception:
+            return Decimal("0")
+
+    raw = str(value or "").strip()
+    raw = re.sub(r"[^\d,.\-]", "", raw)
+    if not raw:
+        return Decimal("0")
+
+    # Formato BR: 1.234,56 -> 1234.56
+    if "," in raw:
+        if "." in raw:
+            raw = raw.replace(".", "")
+        raw = raw.replace(",", ".")
+    else:
+        # Se vier com múltiplos pontos sem vírgula, mantém só o último como decimal.
+        if raw.count(".") > 1:
+            parts = raw.split(".")
+            raw = "".join(parts[:-1]) + "." + parts[-1]
+
     try:
         return Decimal(raw)
     except Exception:
