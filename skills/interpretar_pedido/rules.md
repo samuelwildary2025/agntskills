@@ -45,4 +45,5 @@ Se o cliente pedir um item de forma genérica sem especificar tipo/marca e houve
 - **Arroz**: Assuma Arroz Branco Tipo 1 (1kg).
 - **Café**: Assuma Café Torrado e Moído Tradicional 250g.
 - **Ovos**: Assuma "Cartela 20 unidades Branco" (ou 30 se 20 não existir).
+- **Cuscuz**: Assuma Flocão de Milho 500g (qualquer marca).
 - Se houver outros genéricos: escolha o menor pacote ou a versão tradicional mais comum.

@@ -625,7 +625,7 @@ def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
         kept.append(ln)
     out = "\n".join(kept).strip()
 
-    # Verificamos se há itens no carrinho para decidir o follow-up (evita perguntar "deseja mais" no início)
+    # Verificamos se há itens no carrinho (antes desta mensagem) para decidir o follow-up
     cart_has_items = False
     if phone:
         try:
@@ -635,11 +635,16 @@ def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
         except Exception:
             pass
 
+    has_added_items_now = re.search(r"\-\s*(?:\d+)?.*?\-\s*R\$", out) is not None
+
     if "deseja mais alguma coisa" not in out.lower():
-        if cart_has_items:
-            out = (out + "\n\nDeseja mais alguma coisa?").strip()
+        if cart_has_items or has_added_items_now:
+            if "como posso te ajudar hoje" in out.lower():
+                # Remove o "como posso te ajudar" inapropriado se acabamos de adicionar itens
+                out = re.sub(r"(?i)como posso (te|de) ajudar hoje\??", "", out).strip()
+            out = (out + "\n\nDeseja mais alguma coisa ou podemos finalizar?").strip()
         elif "?" not in out:
-            # Se o carrinho estiver vazio e o agente não fez uma pergunta, adicionamos um "Como posso ajudar?"
+            # Se o carrinho estiver vazio, não adicionamos nada agora, e o agente não fez uma pergunta
             out = (out + "\n\nComo posso te ajudar hoje?").strip()
             
     return out
