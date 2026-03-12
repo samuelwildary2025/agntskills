@@ -8,6 +8,7 @@ VersÃ£o 7.0 - Skills Architecture
 from typing import Dict, Any, TypedDict, Annotated, List, Literal
 import re
 import operator
+import unicodedata
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -359,6 +360,30 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
     if not isinstance(items, list) or not items:
         return "âŒ O pedido estÃ¡ vazio! VocÃª deve repassar a lista de produtos confirmados."
 
+    cliente_clean = str(cliente or "").strip()
+    endereco_clean = str(endereco or "").strip()
+    cliente_norm = _normalize_text_for_match(cliente_clean)
+    endereco_norm = _normalize_text_for_match(endereco_clean)
+
+    if not cliente_clean or cliente_norm in {"cliente", "consumidor", "nao informado", "nao", "sem nome"}:
+        return (
+            "âŒ Para finalizar, preciso do nome do cliente. "
+            "Pergunte o nome completo e depois finalize."
+        )
+
+    invalid_endereco = {
+        "",
+        "a combinar",
+        "nao informado",
+        "sem endereco",
+        "endereco nao informado",
+    }
+    if (not endereco_clean) or (endereco_norm in invalid_endereco):
+        return (
+            "âŒ Para finalizar, preciso confirmar o endereÃ§o de entrega. "
+            "Pergunte: 'Posso enviar para qual endereÃ§o?' e depois finalize."
+        )
+
     comprovante_salvo = get_comprovante(telefone)
     comprovante_final = comprovante or comprovante_salvo or ""
 
@@ -419,9 +444,9 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
         total += taxa_entrega_dec
 
     payload = {
-        "nome_cliente": cliente,
+        "nome_cliente": cliente_clean,
         "telefone": telefone,
-        "endereco": endereco or "A combinar",
+        "endereco": endereco_clean,
         "forma": forma_pagamento,
         "observacao": observacao or "",
         "comprovante_pix": comprovante_final or None,
@@ -623,8 +648,14 @@ def _message_content_to_text(content: Any) -> str:
     return str(content or "").strip()
 
 
+def _normalize_text_for_match(text: str) -> str:
+    base = (text or "").strip().lower()
+    normalized = unicodedata.normalize("NFKD", base)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
 def _is_close_intent(text: str) -> bool:
-    t = (text or "").lower()
+    t = _normalize_text_for_match(text)
     patterns = [
         r"\bso isso\b",
         r"\bs[oÃ³] isso\b",
@@ -634,6 +665,14 @@ def _is_close_intent(text: str) -> bool:
         r"\bencerrar\b",
         r"\bfinaliza\b",
         r"\bconcluir\b",
+        r"\bpix\b",
+        r"\bcartao\b",
+        r"\bcart[aã]o\b",
+        r"\bdinheiro\b",
+        r"\bdebito\b",
+        r"\bcredito\b",
+        r"\bcr[eé]dito\b",
+        r"^\s*\+\+?\s*$",
     ]
     return any(re.search(p, t) for p in patterns)
 
@@ -694,6 +733,18 @@ def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
             continue
         kept.append(ln)
     out = "\n".join(kept).strip()
+    out_norm = _normalize_text_for_match(out)
+
+    # Em respostas de fechamento/finalização não adicionar follow-up genérico.
+    close_markers = [
+        "pedido foi finalizado",
+        "pedido de numero",
+        "valor total oficial",
+        "agradecemos a preferencia",
+        "forma de pagamento",
+    ]
+    if any(marker in out_norm for marker in close_markers):
+        return out
 
     # Verificamos se hÃ¡ itens no carrinho (antes desta mensagem) para decidir o follow-up
     cart_has_items = False
@@ -713,9 +764,6 @@ def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
                 # Remove o "como posso te ajudar" inapropriado se acabamos de adicionar itens
                 out = re.sub(r"(?i)como posso (te|de) ajudar hoje\??", "", out).strip()
             out = (out + "\n\nDeseja mais alguma coisa ou podemos finalizar?").strip()
-        elif "?" not in out:
-            # Se o carrinho estiver vazio, nÃ£o adicionamos nada agora, e o agente nÃ£o fez uma pergunta
-            out = (out + "\n\nComo posso te ajudar hoje?").strip()
             
     return out
 
@@ -803,13 +851,13 @@ def _sanitize_out_of_context_followups(response: str) -> str:
         return response
 
     out = response.strip()
-    low = out.lower()
+    low = _normalize_text_for_match(out)
 
     has_close_context = any(
         marker in low
         for marker in [
             "pedido foi finalizado",
-            "pedido de nÃºmero",
+            "pedido de numero",
             "pedido de numero",
             "finalizado com sucesso",
             "valor total oficial",
@@ -819,9 +867,16 @@ def _sanitize_out_of_context_followups(response: str) -> str:
     if not has_close_context:
         return out
 
-    out = re.sub(r"(?is)\n*\s*como posso (te|de) ajudar hoje\??\s*$", "", out).strip()
-    out = re.sub(r"(?is)\n*\s*deseja mais alguma coisa ou podemos finalizar\??\s*$", "", out).strip()
-    return out
+    filtered_lines = []
+    for ln in out.splitlines():
+        norm_ln = _normalize_text_for_match(ln)
+        if re.search(r"^\s*como posso (te|de) ajudar hoje\??\s*$", norm_ln):
+            continue
+        if re.search(r"^\s*deseja mais alguma coisa ou podemos finalizar\??\s*$", norm_ln):
+            continue
+        filtered_lines.append(ln)
+
+    return "\n".join(filtered_lines).strip()
 
 # Orquestrador removido
 
