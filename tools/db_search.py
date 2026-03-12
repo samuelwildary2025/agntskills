@@ -440,6 +440,9 @@ def search_products_db(query: str, limit: int = 8, telefone: Optional[str] = Non
 
     raw_for_fts = q
     q_no_accents = _strip_accents(q)
+    is_packaged_bread_query = bool(
+        re.search(r"\bpacote\b", q_no_accents) and re.search(r"\bpao\b", q_no_accents)
+    )
 
     configured_table_name = settings.postgres_products_table_name or "produtos-sp-queiroz"
     limit = max(1, min(int(limit or 8), 25))
@@ -486,6 +489,60 @@ def search_products_db(query: str, limit: int = 8, telefone: Optional[str] = Non
         for table_name in candidate_table_names(configured_table_name):
             table_ident = sql.Identifier(table_name)
             queries = []
+
+            # Atalho especializado: "pacote de pão" deve trazer pães embalados
+            # e nunca cair para pão francês/inativos.
+            if is_packaged_bread_query:
+                try:
+                    cursor.execute(
+                        sql.SQL(
+                            """
+                            SELECT id, nome, preco, estoque, unidade, categoria, 1.0 AS rank_match
+                            FROM {table}
+                            WHERE nome NOT ILIKE '%%INATIVO%%'
+                              AND nome NOT ILIKE '%%PAO FRANCES%%'
+                              AND (
+                                  nome ILIKE '%%PAO HOT DOG%%'
+                                  OR nome ILIKE '%%PAO HOTDOG%%'
+                                  OR nome ILIKE '%%PAO HAMBURG%%'
+                                  OR nome ILIKE '%%PAO HAMBURGUA%%'
+                                  OR nome ILIKE '%%PAO FORMA%%'
+                                  OR nome ILIKE '%%MAXPAES%%'
+                                  OR nome ILIKE '%%FATIMA%%'
+                                  OR nome ILIKE '%%RENOPAN%%'
+                                  OR nome ILIKE '%%ROMANA%%'
+                              )
+                              AND (
+                                  categoria ILIKE '%%PADARIA INDUSTRIAL%%'
+                                  OR categoria ILIKE '%%PAES%%'
+                              )
+                            ORDER BY
+                                CASE
+                                    WHEN nome ILIKE '%%MAXPAES%%' THEN 0
+                                    WHEN nome ILIKE '%%FATIMA%%' OR nome ILIKE '%%N.SRA DE FATIMA%%' THEN 1
+                                    WHEN nome ILIKE '%%RENOPAN%%' THEN 2
+                                    WHEN nome ILIKE '%%ROMANA%%' THEN 3
+                                    ELSE 4
+                                END,
+                                CASE
+                                    WHEN nome ILIKE '%%PAO HOT DOG%%' OR nome ILIKE '%%PAO HOTDOG%%' THEN 0
+                                    WHEN nome ILIKE '%%PAO HAMBURG%%' OR nome ILIKE '%%PAO HAMBURGUA%%' THEN 1
+                                    WHEN nome ILIKE '%%PAO FORMA%%' THEN 2
+                                    ELSE 3
+                                END,
+                                preco ASC
+                            LIMIT %s
+                            """
+                        ).format(table=table_ident),
+                        (limit,),
+                    )
+                    results = cursor.fetchall() or []
+                    if results:
+                        last_error = None
+                        logger.info(f"🥖 Busca dedicada pacote de pão retornou {len(results)} item(ns)")
+                        break
+                except Exception as e:
+                    last_error = e
 
             # 1) Híbrida: FTS + trigram + ILIKE (melhor relevância quando disponível)
             if has_unaccent and has_trgm:
