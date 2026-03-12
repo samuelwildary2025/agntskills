@@ -8,6 +8,7 @@ Versão 7.0 - Skills Architecture
 from typing import Dict, Any, TypedDict, Annotated, List, Literal
 import re
 import operator
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
@@ -20,7 +21,7 @@ import json
 
 from config.settings import settings
 from config.logger import setup_logger
-from tools.http_tools import estoque, pedidos, alterar, estoque_preco, consultar_encarte
+from tools.http_tools import estoque, pedidos, alterar, consultar_encarte
 
 from tools.time_tool import get_current_time, search_message_history
 from tools.redis_tools import (
@@ -43,6 +44,7 @@ from tools.redis_tools import (
     clear_suggestions,
     resolve_pending_confirmation,
     clear_pending_confirmations,
+    get_order_context,
 )
 from memory.hybrid_memory import HybridChatMessageHistory
 
@@ -245,25 +247,6 @@ def remove_item_tool(telefone: str, item_index: int, quantidade: float = 0) -> s
         return f"❌ Erro: Item {item_index} não encontrado."
 
 
-@tool("ean")
-def ean_tool_alias(query: str) -> str:
-    """Buscar EAN/infos do produto na base de conhecimento."""
-    q = (query or "").strip()
-    if q.startswith("{") and q.endswith("}"): q = ""
-    return ean_lookup(q)
-
-@tool("estoque")
-def estoque_preco_alias(ean: str) -> str:
-    """Consulta preço e disponibilidade pelo EAN (apenas dígitos)."""
-    return estoque_preco(ean)
-
-
-# ============================================
-# Ferramentas do Analista (Sub-Agente)
-# ============================================
-
-
-
 # --- FERRAMENTAS DO CAIXA ---
 
 @tool
@@ -332,53 +315,111 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
     - taxa_entrega: Valor da taxa de entrega em reais (opcional, padrão 0)
     """
     import json as json_lib
-    
+
+    cents = Decimal("0.01")
+
+    def _to_decimal(value: Any, default: str = "0") -> Decimal:
+        try:
+            raw = str(value if value is not None else default).strip().replace(",", ".")
+            return Decimal(raw)
+        except (InvalidOperation, ValueError, TypeError):
+            return Decimal(default)
+
+    def _recover_price_from_search(nome_produto: str) -> Decimal:
+        from tools.search_router import search_products
+
+        raw = search_products(nome_produto, limit=6, telefone=telefone)
+        try:
+            rows = json_lib.loads(raw or "[]")
+        except Exception:
+            rows = []
+
+        if not isinstance(rows, list):
+            return Decimal("0")
+
+        # Prioriza match_ok=true e preco positivo.
+        candidates = [r for r in rows if isinstance(r, dict)]
+        candidates.sort(
+            key=lambda r: (
+                1 if bool(r.get("match_ok")) else 0,
+                float(r.get("match_score", 0.0) or 0.0),
+            ),
+            reverse=True,
+        )
+
+        for row in candidates:
+            price = _to_decimal(row.get("preco"), "0")
+            if price > 0:
+                return price
+        return Decimal("0")
+
     try:
         items = json_lib.loads(itens_json)
     except Exception as e:
         return f"❌ Erro ao ler os itens do pedido: erro de formato JSON - {e}. Corrija o JSON e tente novamente."
-        
-    if not items:
+
+    if not isinstance(items, list) or not items:
         return "❌ O pedido está vazio! Você deve repassar a lista de produtos confirmados."
 
     comprovante_salvo = get_comprovante(telefone)
     comprovante_final = comprovante or comprovante_salvo or ""
-    
-    total = 0.0
+
+    total = Decimal("0")
     itens_formatados = []
-    
-    for item in items:
-        preco = float(item.get("preco", 0.0))
-        quantidade = float(item.get("quantidade", 1.0))
-        unidades = int(item.get("unidades", 0))
-        obs_item = item.get("observacao", "")
-        total += preco * quantidade
-        
-        nome_produto = item.get("produto", item.get("nome_produto", "Produto"))
-        
+
+    for idx, item in enumerate(items, 1):
+        if not isinstance(item, dict):
+            return f"❌ Item {idx} inválido no JSON. Corrija e tente novamente."
+
+        nome_produto = str(item.get("produto", item.get("nome_produto", "Produto"))).strip() or "Produto"
+        preco = _to_decimal(item.get("preco"), "0")
+        quantidade = _to_decimal(item.get("quantidade", 1), "1")
+        unidades = int(_to_decimal(item.get("unidades", 0), "0"))
+        obs_item = str(item.get("observacao", "") or "").strip()
+
+        if quantidade <= 0:
+            quantidade = Decimal("1")
+
+        if preco <= 0:
+            preco_recuperado = _recover_price_from_search(nome_produto)
+            if preco_recuperado > 0:
+                preco = preco_recuperado
+                logger.info(f"✨ [CHECKOUT] Preço recuperado no SQL para '{nome_produto}': R$ {preco:.2f}")
+            else:
+                return (
+                    f"❌ Não consegui validar o preço de '{nome_produto}' para fechar o pedido. "
+                    "Use busca_produto_tool novamente e confirme o item/preço antes de finalizar."
+                )
+
+        valor_linha = (preco * quantidade).quantize(cents, rounding=ROUND_HALF_UP)
+        total += valor_linha
+
         if unidades > 0:
             qtd_api = unidades
-            valor_estimado = round(preco * quantidade, 2)
-            preco_unitario_api = round(valor_estimado / unidades, 2)
-            obs_peso = f"Peso estimado: {quantidade:.3f}kg (~R${valor_estimado:.2f}). PESAR para confirmar valor."
-            if obs_item:
-                obs_item = f"{obs_item}. {obs_peso}"
-            else:
-                obs_item = obs_peso
+            preco_unitario_api = (valor_linha / Decimal(qtd_api)).quantize(cents, rounding=ROUND_HALF_UP)
+            obs_peso = f"Peso estimado: {float(quantidade):.3f}kg (~R${float(valor_linha):.2f}). PESAR para confirmar valor."
+            obs_final = f"{obs_item}. {obs_peso}".strip(". ") if obs_item else obs_peso
         else:
-            if quantidade < 1 or quantidade != int(quantidade):
+            if quantidade < 1 or quantidade != quantidade.to_integral_value():
                 qtd_api = 1
             else:
                 qtd_api = int(quantidade)
-            preco_unitario_api = round(preco, 2)
-        
-        itens_formatados.append({
-            "nome_produto": nome_produto,
-            "quantidade": qtd_api,
-            "preco_unitario": preco_unitario_api,
-            "observacao": obs_item
-        })
-    
+            preco_unitario_api = preco.quantize(cents, rounding=ROUND_HALF_UP)
+            obs_final = obs_item
+
+        itens_formatados.append(
+            {
+                "nome_produto": nome_produto,
+                "quantidade": qtd_api,
+                "preco_unitario": float(preco_unitario_api),
+                "observacao": obs_final,
+            }
+        )
+
+    taxa_entrega_dec = _to_decimal(taxa_entrega, "0").quantize(cents, rounding=ROUND_HALF_UP)
+    if taxa_entrega_dec > 0:
+        total += taxa_entrega_dec
+
     payload = {
         "nome_cliente": cliente,
         "telefone": telefone,
@@ -386,42 +427,37 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
         "forma": forma_pagamento,
         "observacao": observacao or "",
         "comprovante_pix": comprovante_final or None,
-        "taxa_entrega": round(taxa_entrega, 2) if taxa_entrega > 0 else None,
-        "itens": itens_formatados
+        "taxa_entrega": float(taxa_entrega_dec) if taxa_entrega_dec > 0 else None,
+        "itens": itens_formatados,
     }
-    
-    # Soma taxa ao total para exibição
-    if taxa_entrega > 0:
-        total += taxa_entrega
-    
+
     json_body = json_lib.dumps(payload, ensure_ascii=False)
-    
-    # AUDIT LOG: Registrar payload completo antes de enviar
+
+    # AUDIT LOG: registrar payload antes de enviar.
     try:
         from datetime import datetime
+        import os
+
         audit_entry = {
             "timestamp": datetime.now().isoformat(),
             "telefone": telefone,
             "cliente": cliente,
-            "total": round(total, 2),
+            "total": float(total),
             "itens_count": len(itens_formatados),
-            "payload": payload
+            "payload": payload,
         }
-        import os
         os.makedirs("logs", exist_ok=True)
         with open("logs/pedidos_audit.jsonl", "a", encoding="utf-8") as f:
             f.write(json_lib.dumps(audit_entry, ensure_ascii=False) + "\n")
-        logger.info(f"📋 [AUDIT] Pedido registrado para {telefone} - R$ {total:.2f}")
+        logger.info(f"📋 [AUDIT] Pedido registrado para {telefone} - R$ {float(total):.2f}")
     except Exception as audit_err:
         logger.warning(f"⚠️ Falha no audit log: {audit_err}")
-    
+
     result = pedidos(json_body)
-    
+
     if "sucesso" in result.lower() or "✅" in result:
-        # NÃO LIMPAR O CARRINHO AQUI!
-        # O carrinho deve persistir por 15 minutos (TTL do Redis) para permitir alterações.
-        
-        mark_order_sent(telefone, result) # Atualiza o status da sessão para 'sent'
+        # Ao concluir checkout, limpamos estado para evitar vazamento em novo pedido.
+        mark_order_sent(telefone, result)
         clear_pending_confirmations(telefone)
         clear_suggestions(telefone)
         clear_cart(telefone)
@@ -431,9 +467,13 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
             logger.info(f"🧹 Contexto da conversa limpo após finalização: {telefone}")
         except Exception as e:
             logger.warning(f"Falha ao limpar contexto após finalização: {e}")
-        
-        return f"{result}\n\n💰 **Valor Total Processado:** R$ {total:.2f}\n(O agente DEVE usar este valor na resposta)"
-        
+
+        return (
+            f"{result}\n\n"
+            f"💰 **Valor Total Oficial:** R$ {float(total):.2f}\n"
+            "(O agente DEVE usar este valor na resposta)"
+        )
+
     return result
 
 # --- FERRAMENTAS COMPARTILHADAS ---
@@ -595,6 +635,40 @@ def _is_close_intent(text: str) -> bool:
     return any(re.search(p, t) for p in patterns)
 
 
+def _extract_session_directive(message: str) -> tuple[str, str]:
+    msg = (message or "").strip()
+    if not msg.startswith("[SESS"):
+        return "", msg
+
+    first_line, sep, remainder = msg.partition("\n")
+    clean_remainder = remainder.strip() if sep else ""
+    return first_line.strip(), clean_remainder
+
+
+def _session_indicates_new_order(session_directive: str) -> bool:
+    low = (session_directive or "").lower()
+    return ("novo pedido" in low) or ("nova conversa" in low)
+
+
+def _is_fresh_order_request(text: str) -> bool:
+    low = (text or "").strip().lower()
+    if not low:
+        return False
+    patterns = [
+        r"\bnovo pedido\b",
+        r"\bpedido novo\b",
+        r"\bdo zero\b",
+        r"\bzerar pedido\b",
+        r"\bzera (o )?pedido\b",
+        r"\brecome(c|ç)ar\b",
+        r"\bcome(c|ç)ar de novo\b",
+        r"\blimpa(r)? (o )?pedido\b",
+        r"\besquece(r)? (o )?pedido\b",
+        r"\boutro pedido\b",
+    ]
+    return any(re.search(p, low) for p in patterns)
+
+
 def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
     if not response:
         return response
@@ -729,7 +803,8 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
     Executa o agente de vendas. Suporta texto e imagem (via tag [MEDIA_URL: ...]).
     """
     telefone = normalize_phone(telefone)
-    logger.info(f"[AGENT] Telefone: {telefone} | Msg: {mensagem[:50]}...")
+    msg_log = str(mensagem or "")
+    logger.info(f"[AGENT] Telefone: {telefone} | Msg: {msg_log[:50]}...")
     lock_token = acquire_agent_lock(telefone)
     if not lock_token:
         return {
@@ -738,60 +813,98 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
         }
 
     # Evita vazamento de sugestões de turnos anteriores para o turno atual.
-    # Isso reduz adição de itens "fantasma" quando o cliente manda um novo texto.
     try:
         clear_suggestions(telefone)
     except Exception:
         pass
-    
-    # 1. Extrair URL de imagem se houver
+
+    # 1) Extrair URL de imagem se houver.
     image_url = None
-    clean_message = mensagem
-    
-    media_match = re.search(r"\[MEDIA_URL:\s*(.*?)\]", mensagem)
+    incoming_message = mensagem or ""
+    clean_message = incoming_message
+
+    media_match = re.search(r"\[MEDIA_URL:\s*(.*?)\]", incoming_message)
     if media_match:
         image_url = media_match.group(1)
-        clean_message = mensagem.replace(media_match.group(0), "").strip()
+        clean_message = incoming_message.replace(media_match.group(0), "").strip()
         if not clean_message:
             clean_message = "Analise esta imagem/comprovante enviada."
         logger.info(f"📸 Mídia detectada: {image_url}")
 
-    # 1. Recuperar histórico (Híbrido: Redis=Contexto, Postgres=Log)
-    from memory.hybrid_memory import HybridChatMessageHistory
-    history_handler = HybridChatMessageHistory(session_id=telefone, redis_ttl=getattr(settings, 'redis_ttl', 2400))
-    
-    previous_messages = []
-    try:
-        previous_messages = history_handler.messages
-    except Exception as e:
-        logger.error(f"Erro ao buscar histórico híbrido: {e}")
+    # 2) Injeta contexto de sessão quando não veio do buffer.
+    runtime_message = clean_message
+    if not runtime_message.strip().startswith("[SESS"):
+        try:
+            order_ctx = get_order_context(telefone, runtime_message)
+            if order_ctx:
+                runtime_message = f"{order_ctx}\n\n{runtime_message}" if runtime_message else order_ctx
+        except Exception as e:
+            logger.warning(f"⚠️ Falha ao obter contexto de sessão: {e}")
 
-    # 2. Persistir mensagem do usuário (Salva em Redis e Postgres)
+    session_directive, runtime_user_text = _extract_session_directive(runtime_message)
+    if runtime_user_text:
+        clean_message = runtime_user_text
+
+    should_reset_context = _session_indicates_new_order(session_directive) or _is_fresh_order_request(clean_message)
+
+    # 3) Histórico híbrido (Redis contexto + Postgres log).
+    history_handler = HybridChatMessageHistory(
+        session_id=telefone,
+        redis_ttl=getattr(settings, "redis_ttl", 2400),
+    )
+
+    previous_messages = []
+    if should_reset_context:
+        logger.info(f"🆕 Novo pedido detectado para {telefone}: limpando contexto anterior.")
+        try:
+            clear_cart(telefone)
+            clear_order_session(telefone)
+            clear_pending_confirmations(telefone)
+            clear_suggestions(telefone)
+            start_order_session(telefone)
+        except Exception as e:
+            logger.warning(f"⚠️ Falha parcial limpando estado de pedido: {e}")
+
+        try:
+            history_handler.clear()
+        except Exception as e:
+            logger.warning(f"⚠️ Falha ao limpar histórico híbrido: {e}")
+    else:
+        try:
+            previous_messages = history_handler.messages
+        except Exception as e:
+            logger.error(f"Erro ao buscar histórico híbrido: {e}")
+
+    # 4) Persistir mensagem do usuário (sem tags internas de sessão).
+    user_message_for_history = clean_message or incoming_message
     try:
-        history_handler.add_user_message(mensagem)
+        history_handler.add_user_message(user_message_for_history)
     except Exception as e:
         logger.error(f"Erro ao salvar msg user no histórico: {e}")
 
     try:
-        # CONSTRUIR O GRAFO A CADA EXECUÇÃO para garantir ISOLAMENTO TOTAL
-        # Evita bugs de vazamento de contexto (MemorySaver global)
+        # CONSTRUIR O GRAFO A CADA EXECUÇÃO para garantir ISOLAMENTO TOTAL.
         graph = build_agent_graph()
-        
-        # 3. Construir mensagem com contexto
-        from tools.time_tool import get_current_time
+
+        # 5) Construir mensagem com contexto.
         hora_atual = get_current_time()
         contexto = f"[TELEFONE_CLIENTE: {telefone}]\n[HORÁRIO_ATUAL: {hora_atual}]\n"
-        
+
+        if session_directive:
+            contexto += f"{session_directive}\n"
+        if should_reset_context:
+            contexto += "[SESSÃO] Considere apenas os itens desta nova conversa. Ignore pedidos anteriores.\n"
+
         if image_url:
             contexto += f"[URL_IMAGEM: {image_url}]\n"
 
-        # Primeira mensagem já com pedido direto: permite saudação curta, sem perder objetividade.
         msg_norm = (clean_message or "").strip().lower()
         is_greeting_like = bool(re.match(r"^(oi|ol[aá]|bom dia|boa tarde|boa noite|opa|e ai|eai)\b", msg_norm))
-        if len(previous_messages) == 0 and not is_greeting_like:
+        is_first_turn = len(previous_messages) == 0
+        if is_first_turn and not is_greeting_like:
             contexto += "[INSTRUÇÃO_DE_ESTILO: cliente iniciou com pedido direto. Faça uma saudação curta e natural (máx 1 linha), depois responda objetivamente.]\n"
-        
-        # 3.1 Consultar dados cadastrados do cliente (Sempre injetar para endereço/bairro)
+
+        # 5.1) Consultar dados cadastrados do cliente.
         try:
             from tools.http_tools import consultar_cliente
             cliente_data = consultar_cliente(telefone)
@@ -802,26 +915,25 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
                 cidade_cli = cliente_data.get("cidade", "")
                 total_ped = cliente_data.get("total_pedidos", 0)
                 endereco_full = ", ".join(p for p in [endereco_cli, bairro_cli, cidade_cli] if p.strip())
-                
-                # Se for a primeira mensagem, injeta a tag de Saudação. Se não, apenas informa os dados silenciando o trigger.
-                if len(previous_messages) == 0:
+
+                if is_first_turn:
                     contexto += f"[CLIENTE_CADASTRADO: {nome_cli} | Endereço: {endereco_full} | Pedidos anteriores: {total_ped}]\n[SESSÃO] Nova conversa.\n"
                 else:
                     contexto += f"[DADOS DO CLIENTE PARA ENTREGA: {nome_cli} | Endereço: {endereco_full}]\n"
-                
+
                 logger.info(f"👤 Cliente cadastrado: {nome_cli} ({total_ped} pedidos)")
             else:
-                if len(previous_messages) == 0:
-                     contexto += "[CLIENTE_NOVO: não cadastrado]\n[SESSÃO] Nova conversa.\n"
+                if is_first_turn:
+                    contexto += "[CLIENTE_NOVO: não cadastrado]\n[SESSÃO] Nova conversa.\n"
         except Exception as e:
             logger.warning(f"⚠️ Falha ao consultar cliente: {e}")
-            if len(previous_messages) == 0:
-                 contexto += "[CLIENTE_NOVO: não cadastrado]\n[SESSÃO] Nova conversa.\n"
+            if is_first_turn:
+                contexto += "[CLIENTE_NOVO: não cadastrado]\n[SESSÃO] Nova conversa.\n"
 
-        # Expansão de mensagens curtas
+        # Expansão de mensagens curtas.
         mensagem_expandida = clean_message
-        msg_lower = clean_message.lower().strip()
-        
+        msg_lower = (clean_message or "").lower().strip()
+
         if msg_lower in ["sim", "s", "ok", "pode", "isso", "quero", "beleza", "blz", "bora", "vamos"]:
             ultima_pergunta_ia = ""
             for msg in reversed(previous_messages):
@@ -830,16 +942,20 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
                     if content.strip() and not content.startswith("["):
                         ultima_pergunta_ia = content[:200]
                         break
-            
+
             if ultima_pergunta_ia:
-                mensagem_expandida = f"O cliente respondeu '{clean_message}' CONFIRMANDO. Sua mensagem anterior foi: \"{ultima_pergunta_ia}...\". Se você sugeriu produtos, use busca_produto_tool para confirmar preço e atualize o pedido no contexto antes de seguir. Não invente preço."
+                mensagem_expandida = (
+                    f"O cliente respondeu '{clean_message}' CONFIRMANDO. Sua mensagem anterior foi: "
+                    f"\"{ultima_pergunta_ia}...\". Se você sugeriu produtos, use busca_produto_tool para "
+                    "confirmar preço e atualizar o pedido no contexto. Não invente preço."
+                )
                 logger.info(f"🔄 Mensagem curta expandida: '{clean_message}'")
         elif msg_lower in ["nao", "não", "n", "nope", "nao quero", "não quero"]:
             mensagem_expandida = f"O cliente respondeu '{clean_message}' (NEGATIVO). Pergunte se precisa de mais alguma coisa."
-        
+
         contexto += "\n"
-        
-        # Construir mensagem (multimodal se tiver imagem)
+
+        # 6) Construir mensagem (multimodal se tiver imagem).
         if image_url:
             message_content = [
                 {"type": "text", "text": contexto + mensagem_expandida},
@@ -849,43 +965,38 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
         else:
             current_message = HumanMessage(content=contexto + mensagem_expandida)
 
-        # 4. Montar estado inicial
+        # 7) Montar estado inicial.
         all_messages = list(previous_messages) + [current_message]
-        
         initial_state = {
             "messages": all_messages,
             "phone": telefone,
             "final_response": ""
         }
-        
+
         logger.info(f"📨 Enviando {len(all_messages)} mensagens para o grafo")
-        
         config = {"configurable": {"thread_id": telefone}}
-        
-        # 5. Executar o grafo
+
+        # 8) Executar o grafo.
         result = graph.invoke(initial_state, config)
-        
-        # 6. Extrair resposta final
         output = result.get("final_response", "")
-        
+
         if not output or not output.strip():
             logger.warning("⚠️ Resposta vazia, tentando extrair das mensagens")
             output = _extract_response({"messages": result.get("messages", [])})
-        
+
         if not output or not output.strip():
             output = "Desculpe, tive um problema ao processar. Pode repetir por favor?"
-        
+
         logger.info(f"✅ [AGENT] Resposta: {output[:200]}...")
-        
-        # 7. Salvar histórico (IA)
-        if history_handler:
-            try:
-                history_handler.add_ai_message(output)
-            except Exception as e:
-                logger.error(f"Erro DB AI: {e}")
+
+        # 9) Salvar histórico (IA).
+        try:
+            history_handler.add_ai_message(output)
+        except Exception as e:
+            logger.error(f"Erro DB AI: {e}")
 
         return {"output": output, "error": None}
-        
+
     except Exception as e:
         logger.error(f"Falha agente: {e}", exc_info=True)
         return {"output": "Tive um problema técnico, tente novamente.", "error": str(e)}
