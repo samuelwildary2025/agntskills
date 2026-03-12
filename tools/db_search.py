@@ -205,6 +205,11 @@ def _apply_term_translations(query: str) -> str:
         return "ovo branco 20"
     # "pacote de pao" deve buscar paes embalados (hot dog/hamburguer/max paes/fatima)
     if re.search(r"\bpacote\b", q_no_acc) and re.search(r"\bpao\b", q_no_acc):
+        return "pao hot dog hamburguer forma maxpaes fatima"
+    if re.search(r"\bpao\b", q_no_acc) and re.search(
+        r"\b(embalad[oa]?|de\s+forma|hot\s*dog|hotdog|hamburguer|hamburgao|hamburguao)\b",
+        q_no_acc,
+    ):
         return "pao hot dog hamburguer maxpaes fatima"
 
     q_low = q.lower()
@@ -441,7 +446,11 @@ def search_products_db(query: str, limit: int = 8, telefone: Optional[str] = Non
     raw_for_fts = q
     q_no_accents = _strip_accents(q)
     is_packaged_bread_query = bool(
-        re.search(r"\bpacote\b", q_no_accents) and re.search(r"\bpao\b", q_no_accents)
+        re.search(r"\bpao\b", q_no_accents)
+        and re.search(
+            r"\b(pacote|embalad[oa]?|de\s+forma|hot\s*dog|hotdog|hamburguer|hamburgao|hamburguao)\b",
+            q_no_accents,
+        )
     )
 
     configured_table_name = settings.postgres_products_table_name or "produtos-sp-queiroz"

@@ -41,6 +41,7 @@ Este agente opera baseado em diretórios de Skills (Habilidades). Cada etapa do 
 7. **Buscador Inteligente (Retry Silencioso):** Se usar o `busca_produto_tool` e não encontrar o produto, **NUNCA** diga ao cliente "não achei, vou buscar outro". Faça novas buscas *em silêncio*. Se a busca retornar `AVISO_BAIXA_CONFIANCA` ou `AVISO_AMBIGUIDADE`, **NÃO TENTE FAZER NOVAS BUSCAS**. Aceite o aviso imediatamente e na mesma resposta pergunte ao cliente para resolver a ambiguidade. Envie apenas **uma única mensagem final** pro cliente com as opções e dúvidas. Ficar buscando sem parar causará erro no sistema.
 8. **Formato da Resposta de Adição**: Quando adicionar itens, você DEVE retornar as confirmações em formato de lista estrita e clara. Siga as regras:
    - **Autoridade de Cálculo (Conversa)**: Você calcula os valores para manter fluidez da conversa. Esses valores são **estimados** durante a montagem.
+   - **Validação obrigatória de total**: antes de enviar a mensagem final de confirmação dos itens, chame `ver_pedido_tool` e use o subtotal retornado como base do `Total estimado`. Isso evita divergência por soma manual.
    - Realize sempre o cálculo: `Preço Unitário x Quantidade = Total da Linha`.
    - Formato de linha: `- [Quantidade] [Nome do Produto] - R$ [Total Calculado da Linha]`
    - No final da lista, SEMPRE apresente a soma total de todos os itens confirmados até agora:
