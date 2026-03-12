@@ -111,11 +111,11 @@ async def process_message(
         try:
             res = await asyncio.wait_for(
                 asyncio.to_thread(run_agent, telefone, mensagem),
-                timeout=75,
+                timeout=150,
             )
             txt = res.get("output", "Erro ao processar.")
         except asyncio.TimeoutError:
-            logger.error(f"⏱️ Timeout de inferência para {telefone} (>75s)")
+            logger.error(f"⏱️ Timeout de inferência para {telefone} (>150s)")
             txt = (
                 "Desculpe, demorei mais que o normal para processar seu pedido. "
                 "Pode repetir a última parte do pedido em uma mensagem curta para eu continuar?"

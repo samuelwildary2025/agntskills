@@ -954,10 +954,10 @@ def process_async(tel, msg, mid=None):
         try:
             with ThreadPoolExecutor(max_workers=1) as ex:
                 fut = ex.submit(run_agent, tel, msg)
-                res = fut.result(timeout=75)
+                res = fut.result(timeout=150)
             txt = res.get("output", "Erro ao processar.")
         except FutureTimeoutError:
-            logger.error(f"⏱️ Timeout de inferência (fallback sync) para {tel} (>75s)")
+            logger.error(f"⏱️ Timeout de inferência (fallback sync) para {tel} (>150s)")
             txt = (
                 "Desculpe, demorei mais que o normal para processar seu pedido. "
                 "Pode repetir a última parte do pedido em uma mensagem curta para eu continuar?"
