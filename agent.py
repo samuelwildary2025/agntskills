@@ -198,18 +198,16 @@ def ver_pedido_tool(telefone: str) -> str:
     items = get_cart_items(telefone)
     if not items:
         return "📝 Sua lista está vazia."
-    
+
     lines = ["📝 **Resumo do Pedido:**"]
-    total = 0.0
     for i, item in enumerate(items, 1):
         nome = item.get("produto", "Item")
         qtd = item.get("quantidade", 1)
         preco = item.get("preco", 0)
-        unidades = item.get("unidades", 0)
-        
+
         qtd_display = int(qtd) if qtd == int(qtd) else qtd
         lines.append(f"{i}. {qtd_display}x {nome} - R$ {preco:.2f}/un")
-    
+
     return "\n".join(lines)
 
 @tool
