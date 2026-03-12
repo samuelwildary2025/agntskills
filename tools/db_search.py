@@ -174,6 +174,12 @@ def _apply_term_translations(query: str) -> str:
     # Regra de exceção: "creme de leite" não deve cair na tradução genérica
     # de "leite" -> "leite integral".
     q_no_acc = _strip_accents(q.lower())
+    if "cafe" in q_no_acc and "principal" in q_no_acc:
+        return "cafe principal"
+    if "puro" in q_no_acc and "sabor" in q_no_acc and ("manteiga" in q_no_acc or "margarina" in q_no_acc):
+        return "margarina puro sabor"
+    if "max paes" in q_no_acc:
+        return q_no_acc.replace("max paes", "maxpaes")
     if re.search(r"\bcreme\s+de\s+leite\b", q_no_acc) or re.search(r"\bcreme\s+leite\b", q_no_acc):
         if "nestle" in q_no_acc:
             return "creme leite nestle"
@@ -199,7 +205,7 @@ def _apply_term_translations(query: str) -> str:
         return "ovo branco 20"
     # "pacote de pao" deve buscar paes embalados (hot dog/hamburguer/max paes/fatima)
     if re.search(r"\bpacote\b", q_no_acc) and re.search(r"\bpao\b", q_no_acc):
-        return "pao hot dog hamburguer max paes fatima"
+        return "pao hot dog hamburguer maxpaes fatima"
 
     q_low = q.lower()
     tokens = q_low.split(" ")
@@ -731,6 +737,8 @@ def search_products_db(query: str, limit: int = 8, telefone: Optional[str] = Non
                 "abacaxi": "kg",
                 "laranja": "kg",
                 "pacote pao": "hot dog",
+                "cafe principal": "cafe principal",
+                "margarina puro sabor": "margarina puro sabor",
             }
             q_lower = q.lower()
             for termo, boost_word in PRIORITY_BOOST.items():
@@ -755,6 +763,30 @@ def search_products_db(query: str, limit: int = 8, telefone: Optional[str] = Non
                 if kg_boosted:
                     results = kg_boosted + kg_others
                     logger.info(f"⬆️ Priorização Horti: {len(kg_boosted)} produto(s) KG movido(s) para o topo")
+
+            # PRIORIZAÇÃO ESPECÍFICA: "pacote de pão" -> pão embalado (hot dog/hambúrguer/etc.)
+            if re.search(r"\bpacote\b", q_no_acc) and re.search(r"\bpao\b", q_no_acc):
+                paes_embalados = []
+                outros = []
+                for r in results:
+                    nome_no_acc = _strip_accents((r.get("nome") or "").lower())
+                    cat_no_acc = _strip_accents((r.get("categoria") or "").lower())
+                    is_packaged = (
+                        "pao" in nome_no_acc
+                        and (
+                            "padaria industrial" in cat_no_acc
+                            or "paes industrializ" in cat_no_acc
+                            or any(k in nome_no_acc for k in ["hot dog", "hotdog", "hamburg", "maxpaes", "fatima", "renopan", "romana"])
+                        )
+                        and "pao frances" not in nome_no_acc
+                    )
+                    if is_packaged:
+                        paes_embalados.append(r)
+                    else:
+                        outros.append(r)
+                if paes_embalados:
+                    results = paes_embalados + outros
+                    logger.info("⬆️ Priorização: pacote de pão (embalado) movido para o topo")
 
         json_str = _format_results(results)
 

@@ -48,11 +48,51 @@ def _requested_brand(raw: str) -> str:
         "betania": "betania",
         "danone": "danone",
         "sorriso": "sorriso",
+        "principal": "principal",
+        "maxpaes": "maxpaes",
+        "max": "maxpaes",
+        "fatima": "fatima",
+        "renopan": "renopan",
+        "romana": "romana",
+        "puro": "puro sabor",
+        "purosabor": "puro sabor",
+        "sabor": "puro sabor",
     }
+    q_join = " ".join(sorted(q_tokens))
+    if "puro" in q_tokens and "sabor" in q_tokens:
+        return "puro sabor"
+    if "max" in q_tokens and "paes" in q_tokens:
+        return "maxpaes"
     for alias, canonical in brand_aliases.items():
-        if alias in q_tokens:
+        if alias in q_tokens or alias in q_join:
             return canonical
     return ""
+
+
+def _is_packaged_bread_item(item: dict) -> bool:
+    name = _strip_accents((item.get("nome") or "").lower())
+    cat = _strip_accents((item.get("categoria") or "").lower())
+    if "pao" not in name:
+        return False
+
+    packaged_keywords = [
+        "hot dog",
+        "hotdog",
+        "hamburg",
+        "maxpaes",
+        "fatima",
+        "n.sra de fatima",
+        "nossa senhora de fatima",
+        "renopan",
+        "romana",
+        "bisnaga",
+        "forma",
+        "integral",
+    ]
+    is_packaged_cat = "padaria industrial" in cat or "paes industrializ" in cat
+    has_packaged_kw = any(k in name for k in packaged_keywords)
+    is_french_bread = "pao frances" in name or "frances" in name
+    return (is_packaged_cat or has_packaged_kw) and not is_french_bread
 
 def _needs_confirmation(items: list, original_query: str) -> tuple[bool, str]:
     candidates = [i for i in items if isinstance(i, dict) and "nome" in i]
@@ -233,17 +273,39 @@ def _semantic_rerank(items: list, original_query: str) -> list:
 
         if requested_brand:
             if requested_brand in name:
-                semantic += 0.08
+                semantic += 0.30
             else:
-                semantic -= 0.02
+                semantic -= 0.15
 
         if "pao" in q_tokens and "pacote" in q_tokens:
-            if any(k in name for k in ["hot dog", "hamburg", "max paes", "fatima"]):
+            if _is_packaged_bread_item(item):
                 semantic += 0.30
-            elif "pao" in name and "pacote" in name:
+            elif "pao" in name:
                 semantic += 0.20
+            elif "hamburg" in name and "pao" not in name:
+                semantic -= 0.35
             elif "pao frances" in name or "frances" in name:
                 semantic -= 0.12
+
+        if "cafe" in q_tokens and "principal" in q_tokens:
+            if "cafe principal" in name:
+                semantic += 0.45
+            elif "cafe" in name:
+                semantic += 0.10
+            if "soluvel" in name or "descafeinado" in name:
+                semantic -= 0.25
+
+        if ("manteiga" in q_tokens and "puro" in q_tokens and "sabor" in q_tokens) or (
+            "puro" in q_tokens and "sabor" in q_tokens
+        ):
+            if "margarina puro sabor" in name:
+                semantic += 0.45
+                if any(sz in name for sz in ["250g", "500g", "1kg"]):
+                    semantic += 0.20
+                if any(sz in name for sz in ["3kg", "15kg"]):
+                    semantic -= 0.30
+            elif "manteiga" in name or "amanteig" in name:
+                semantic -= 0.25
 
         if "integral" in q_tokens:
             if "integral" in name:
@@ -371,6 +433,12 @@ def buscar_e_validar(telefone: str, query: str) -> str:
 
     resultados = list(merged.values())
     resultados = _semantic_rerank(resultados, query_original)
+
+    q_norm = _strip_accents(query_original)
+    if "pacote" in q_norm and "pao" in q_norm and resultados:
+        packaged_only = [r for r in resultados if isinstance(r, dict) and _is_packaged_bread_item(r)]
+        if packaged_only:
+            resultados = packaged_only + [r for r in resultados if r not in packaged_only]
 
     if is_beef_strog_intent and resultados:
         strog_results = []
