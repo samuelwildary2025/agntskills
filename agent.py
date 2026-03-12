@@ -171,9 +171,9 @@ def add_item_tool(telefone: str, produto: str, quantidade: float = 1.0, observac
          # Calcular valor estimado TOTAL (já que o peso deve vir correto do LLM)
          valor_estimado = quantidade * preco
          if unidades > 0:
-             return f"✅ Adicionado: {unidades}x {produto} ({quantidade:.3f}kg) - Total Estimado: R$ {valor_estimado:.2f}"
+             return f"✅ Adicionado: {unidades}x {produto} ({quantidade:.3f}kg)"
          else:
-             return f"✅ Adicionado: {quantidade} {produto} - Total: R$ {valor_estimado:.2f}"
+             return f"✅ Adicionado: {quantidade} {produto}"
     return "❌ Erro ao adicionar item."
 
 @tool
@@ -205,16 +205,10 @@ def ver_pedido_tool(telefone: str) -> str:
         preco = item.get("preco", 0)
         unidades = item.get("unidades", 0)
         
-        valor = preco * qtd
-        total += valor
-        
-        if unidades > 0:
-            lines.append(f"{i}. {unidades}x {nome} - Total Estimado: R$ {valor:.2f}")
-        else:
-            qtd_display = int(qtd) if qtd == int(qtd) else qtd
-            lines.append(f"{i}. {qtd_display}x {nome} - R$ {valor:.2f}")
+             qtd_display = int(qtd) if qtd == int(qtd) else qtd
+             lines.append(f"{i}. {qtd_display}x {nome} - R$ {preco:.2f}/un")
     
-    lines.append(f"\n**Subtotal:** R$ {total:.2f}")
+    return "\n".join(lines)
     return "\n".join(lines)
 
 @tool
