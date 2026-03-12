@@ -47,6 +47,7 @@ def _requested_brand(raw: str) -> str:
         "italac": "italac",
         "betania": "betania",
         "danone": "danone",
+        "sorriso": "sorriso",
     }
     for alias, canonical in brand_aliases.items():
         if alias in q_tokens:
@@ -98,6 +99,12 @@ def _needs_confirmation(items: list, original_query: str) -> tuple[bool, str]:
 
     q_norm = _strip_accents((original_query or "").lower())
     top_name = _strip_accents((ranked[0].get("nome", "") or "").lower())
+    requested_brand = _requested_brand(original_query)
+    if requested_brand:
+        # Se a marca pedida aparece no topo, evitamos pedir confirmação por variação.
+        if requested_brand in top_name:
+            return False, ""
+
     strog_intent = bool(re.search(r"\b(strogonoff|strogonof|estrogonoff|estrogonof)\b", q_norm))
     if strog_intent and not re.search(r"\b(strogonoff|strogonof|estrogonoff|estrogonof)\b", top_name):
         return True, "pedido de strogonoff sem item de strogonoff no topo"
@@ -134,6 +141,10 @@ def _needs_confirmation(items: list, original_query: str) -> tuple[bool, str]:
         if not wants_noturno and ("abs" in top_name or "absorv" in top_name):
             return False, ""
     if all(k in q_norm for k in ["pao", "integral", "fatima"]) and all(k in top_name for k in ["pao", "integral", "fatima"]):
+        return False, ""
+    if all(k in q_norm for k in ["pacote", "pao"]) and any(
+        k in top_name for k in ["hot dog", "hamburg", "max paes", "fatima"]
+    ):
         return False, ""
 
     if very_low_score and weak_coverage:
@@ -225,6 +236,14 @@ def _semantic_rerank(items: list, original_query: str) -> list:
                 semantic += 0.08
             else:
                 semantic -= 0.02
+
+        if "pao" in q_tokens and "pacote" in q_tokens:
+            if any(k in name for k in ["hot dog", "hamburg", "max paes", "fatima"]):
+                semantic += 0.30
+            elif "pao" in name and "pacote" in name:
+                semantic += 0.20
+            elif "pao frances" in name or "frances" in name:
+                semantic -= 0.12
 
         if "integral" in q_tokens:
             if "integral" in name:

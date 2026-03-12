@@ -197,6 +197,9 @@ def _apply_term_translations(query: str) -> str:
         return "mini bolinha pannemix queijo kg"
     if re.search(r"\b(bandeja|cartela)\b", q_no_acc) and re.search(r"\bovos?\b", q_no_acc):
         return "ovo branco 20"
+    # "pacote de pao" deve buscar paes embalados (hot dog/hamburguer/max paes/fatima)
+    if re.search(r"\bpacote\b", q_no_acc) and re.search(r"\bpao\b", q_no_acc):
+        return "pao hot dog hamburguer max paes fatima"
 
     q_low = q.lower()
     tokens = q_low.split(" ")
@@ -727,6 +730,7 @@ def search_products_db(query: str, limit: int = 8, telefone: Optional[str] = Non
                 "alho": "kg",
                 "abacaxi": "kg",
                 "laranja": "kg",
+                "pacote pao": "hot dog",
             }
             q_lower = q.lower()
             for termo, boost_word in PRIORITY_BOOST.items():
