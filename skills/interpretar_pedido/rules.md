@@ -45,5 +45,6 @@ Se o cliente pedir um item de forma genérica sem especificar tipo/marca e houve
 - **Arroz**: Assuma Arroz Branco Tipo 1 (1kg).
 - **Café**: Assuma Café Torrado e Moído Tradicional 250g.
 - **Ovos**: Assuma "Cartela 20 unidades Branco" (ou 30 se 20 não existir).
-- **Cuscuz**: Assuma Flocão de Milho 500g (qualquer marca).
+- **Cuscuz**: Assuma Flocão 500g (qualquer marca).
+- **Margarina / Manteiga**: Assuma o pote tradicional de 250g ou 500g. NUNCA escolha baldes industriais (1kg, 3kg, etc.) a menos que pedido expressamente.
 - Se houver outros genéricos: escolha o menor pacote ou a versão tradicional mais comum.
