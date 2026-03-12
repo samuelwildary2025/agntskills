@@ -1,8 +1,8 @@
-"""
+﻿"""
 Agente de IA para Atendimento de Supermercado usando LangGraph
-Arquitetura: Vendedor (Agente Único + Skills)
+Arquitetura: Vendedor (Agente Ãšnico + Skills)
 
-Versão 7.0 - Skills Architecture
+VersÃ£o 7.0 - Skills Architecture
 """
 
 from typing import Dict, Any, TypedDict, Annotated, List, Literal
@@ -55,7 +55,7 @@ logger = setup_logger(__name__)
 # ============================================
 
 def add_messages(left: list, right: list) -> list:
-    """Função para combinar listas de mensagens."""
+    """FunÃ§Ã£o para combinar listas de mensagens."""
     return left + right
 
 class AgentState(TypedDict):
@@ -65,7 +65,7 @@ class AgentState(TypedDict):
     final_response: str  # Resposta final para o cliente
 
 # ============================================
-# Definição das Ferramentas (Separadas por Agente)
+# DefiniÃ§Ã£o das Ferramentas (Separadas por Agente)
 # ============================================
 
 # --- FERRAMENTAS DO VENDEDOR ---
@@ -73,10 +73,10 @@ class AgentState(TypedDict):
 @tool
 def busca_produto_tool(telefone: str, query: str) -> str:
     """
-    Busca produtos e preços. A Inteligência de Busca é SUA!
+    Busca produtos e preÃ§os. A InteligÃªncia de Busca Ã© SUA!
     - Se o cliente pediu especificamente por nome (ex: "massa de tapioca"), passe "tapioca".
-    - Se o cliente usou gírias ou sinônimos complexos (ex: "veneno pra rato", "muriçoca"), VOcÊ deve traduzir para a categoria correta (ex: "inseticida", "rato").
-    - Não passe textos longos. Extraia a essência do produto (ex: "tem aquele sabão em pó brilhante?" -> passe apenas "sabao em po brilhante").
+    - Se o cliente usou gÃ­rias ou sinÃ´nimos complexos (ex: "veneno pra rato", "muriÃ§oca"), VOcÃŠ deve traduzir para a categoria correta (ex: "inseticida", "rato").
+    - NÃ£o passe textos longos. Extraia a essÃªncia do produto (ex: "tem aquele sabÃ£o em pÃ³ brilhante?" -> passe apenas "sabao em po brilhante").
 
     Retorna um JSON list com os dados dos produtos avaliados semanticamente.
     """
@@ -87,27 +87,27 @@ def busca_produto_tool(telefone: str, query: str) -> str:
 def add_item_tool(telefone: str, produto: str, quantidade: float = 1.0, observacao: str = "", preco: float = 0.0, unidades: int = 0) -> str:
     """
     Adicionar um item ao pedido do cliente.
-    USAR IMEDIATAMENTE quando o cliente demonstrar intenção de compra.
+    USAR IMEDIATAMENTE quando o cliente demonstrar intenÃ§Ã£o de compra.
     
     Para produtos vendidos por KG (frutas, legumes, carnes):
     - quantidade: peso em kg (ex: 0.45 para 450g)
-    - unidades: número de unidades pedidas (ex: 3 para 3 tomates)
-    - preco: preço por kg
+    - unidades: nÃºmero de unidades pedidas (ex: 3 para 3 tomates)
+    - preco: preÃ§o por kg
     
-    Para produtos unitários:
-    - quantidade: número de itens
+    Para produtos unitÃ¡rios:
+    - quantidade: nÃºmero de itens
     - unidades: deixar 0
-    - preco: preço por unidade
+    - preco: preÃ§o por unidade
     """
     
-    # IMPORTAR AQUI para evitar ciclo de importação
+    # IMPORTAR AQUI para evitar ciclo de importaÃ§Ã£o
     from tools.redis_tools import get_suggestions
     import difflib
 
     prod_lower = produto.lower().strip()
     
-    # 0. TENTATIVA DE RECUPERAÇÃO DE PREÇO (Auto-Healing)
-    # Se o agente esqueceu o preço (0.0), tentamos achar nas sugestões recentes
+    # 0. TENTATIVA DE RECUPERAÃ‡ÃƒO DE PREÃ‡O (Auto-Healing)
+    # Se o agente esqueceu o preÃ§o (0.0), tentamos achar nas sugestÃµes recentes
     melhor_match = None
     if preco <= 0.01:
         sugestoes = get_suggestions(telefone)
@@ -130,28 +130,28 @@ def add_item_tool(telefone: str, produto: str, quantidade: float = 1.0, observac
                     melhor_score = ratio
                     melhor_match = sug
 
-            # Limiar mais conservador para evitar casar produto errado por ruído.
+            # Limiar mais conservador para evitar casar produto errado por ruÃ­do.
             if melhor_match and melhor_score >= 0.72:
                 preco_recuperado = float(melhor_match.get("preco", 0.0) or 0.0)
                 if preco_recuperado > 0:
                     preco = preco_recuperado
                     logger.info(
-                        f"✨ [AUTO-HEAL] Preço recuperado para '{produto}': R$ {preco:.2f} "
+                        f"âœ¨ [AUTO-HEAL] PreÃ§o recuperado para '{produto}': R$ {preco:.2f} "
                         f"(score={melhor_score:.2f}, base='{melhor_match.get('nome')}')"
                     )
     
-    # BLOQUEIO: Não permitir adicionar item sem preço válido
+    # BLOQUEIO: NÃ£o permitir adicionar item sem preÃ§o vÃ¡lido
     if preco <= 0.01:
-        logger.warning(f"🚫 [ADD_ITEM] Bloqueado: '{produto}' sem preço válido (R$ {preco:.2f}). Use busca_produto_tool primeiro.")
-        return f"❌ Não consegui encontrar o preço de '{produto}'. Use busca_produto_tool para verificar o preço antes de adicionar."
+        logger.warning(f"ðŸš« [ADD_ITEM] Bloqueado: '{produto}' sem preÃ§o vÃ¡lido (R$ {preco:.2f}). Use busca_produto_tool primeiro.")
+        return f"âŒ NÃ£o consegui encontrar o preÃ§o de '{produto}'. Use busca_produto_tool para verificar o preÃ§o antes de adicionar."
     
-    # Validar match_ok nas sugestões — se o produto não passou na validação, avisar
+    # Validar match_ok nas sugestÃµes â€” se o produto nÃ£o passou na validaÃ§Ã£o, avisar
     if melhor_match is not None and not bool(melhor_match.get("match_ok", True)):
-        logger.warning(f"⚠️ [ADD_ITEM] Produto '{produto}' tem match_ok=false. Pedindo confirmação.")
-        return f"⚠️ '{produto}' não parece ser uma correspondência exata. Confirme com o cliente qual opção ele deseja antes de adicionar."
+        logger.warning(f"âš ï¸ [ADD_ITEM] Produto '{produto}' tem match_ok=false. Pedindo confirmaÃ§Ã£o.")
+        return f"âš ï¸ '{produto}' nÃ£o parece ser uma correspondÃªncia exata. Confirme com o cliente qual opÃ§Ã£o ele deseja antes de adicionar."
     
     if unidades > 0 and quantidade <= 0.01:
-         logger.warning(f"⚠️ [ADD_ITEM] Item '{produto}' com unidades={unidades} mas peso zerado. O LLM deveria ter calculado.")
+         logger.warning(f"âš ï¸ [ADD_ITEM] Item '{produto}' com unidades={unidades} mas peso zerado. O LLM deveria ter calculado.")
     
     # Construir JSON do item para add_item_to_cart
     import json
@@ -170,18 +170,18 @@ def add_item_tool(telefone: str, produto: str, quantidade: float = 1.0, observac
              resolve_pending_confirmation(telefone, produto)
          except Exception:
              pass
-         # Calcular valor estimado TOTAL (já que o peso deve vir correto do LLM)
+         # Calcular valor estimado TOTAL (jÃ¡ que o peso deve vir correto do LLM)
          valor_estimado = quantidade * preco
          if unidades > 0:
-             return f"✅ Adicionado: {unidades}x {produto} ({quantidade:.3f}kg)"
+             return f"âœ… Adicionado: {unidades}x {produto} ({quantidade:.3f}kg)"
          else:
-             return f"✅ Adicionado: {quantidade} {produto}"
-    return "❌ Erro ao adicionar item."
+             return f"âœ… Adicionado: {quantidade} {produto}"
+    return "âŒ Erro ao adicionar item."
 
 @tool
 def reset_pedido_tool(telefone: str) -> str:
     """
-    Zera o pedido do cliente (carrinho, sessão, comprovante e sugestões) e inicia uma nova sessão.
+    Zera o pedido do cliente (carrinho, sessÃ£o, comprovante e sugestÃµes) e inicia uma nova sessÃ£o.
     """
     telefone = normalize_phone(telefone)
     clear_cart(telefone)
@@ -190,16 +190,16 @@ def reset_pedido_tool(telefone: str) -> str:
     clear_suggestions(telefone)
     clear_pending_confirmations(telefone)
     start_order_session(telefone)
-    return "✅ Pedido zerado com sucesso! Pode me enviar a nova lista de itens."
+    return "âœ… Pedido zerado com sucesso! Pode me enviar a nova lista de itens."
 
 @tool
 def ver_pedido_tool(telefone: str) -> str:
     """Ver os itens atuais no pedido do cliente."""
     items = get_cart_items(telefone)
     if not items:
-        return "📝 Sua lista está vazia."
+        return "ðŸ“ Sua lista estÃ¡ vazia."
 
-    lines = ["📝 **Resumo do Pedido:**"]
+    lines = ["ðŸ“ **Resumo do Pedido:**"]
     for i, item in enumerate(items, 1):
         nome = item.get("produto", "Item")
         qtd = item.get("quantidade", 1)
@@ -213,36 +213,36 @@ def ver_pedido_tool(telefone: str) -> str:
 @tool
 def remove_item_tool(telefone: str, item_index: int, quantidade: float = 0) -> str:
     """
-    Remover um item do carrinho pelo número (índice 1-based).
+    Remover um item do carrinho pelo nÃºmero (Ã­ndice 1-based).
     
-    Se quantidade = 0 ou não informada: Remove o item INTEIRO.
+    Se quantidade = 0 ou nÃ£o informada: Remove o item INTEIRO.
     Se quantidade > 0: Remove APENAS essa quantidade (ex: tirar 1 unidade de 3).
     
     Exemplos:
-    - Cliente: "tira o item 2" → remove_item_tool(tel, 2, 0) → Remove item 2 inteiro
-    - Cliente: "tira 1 nescau" → remove_item_tool(tel, 2, 1) → Remove 1 unidade do item 2
+    - Cliente: "tira o item 2" â†’ remove_item_tool(tel, 2, 0) â†’ Remove item 2 inteiro
+    - Cliente: "tira 1 nescau" â†’ remove_item_tool(tel, 2, 1) â†’ Remove 1 unidade do item 2
     """
     from tools.redis_tools import remove_item_from_cart, update_item_quantity
     
-    # Converter para índice 0-based
+    # Converter para Ã­ndice 0-based
     idx_zero_based = int(item_index) - 1
     
     if quantidade > 0:
-        # Remoção PARCIAL - reduz quantidade
+        # RemoÃ§Ã£o PARCIAL - reduz quantidade
         result = update_item_quantity(telefone, idx_zero_based, quantidade)
         
         if result["success"]:
             if result["removed_completely"]:
-                return f"✅ {result['item_name']} removido completamente do pedido."
+                return f"âœ… {result['item_name']} removido completamente do pedido."
             else:
-                return f"✅ Removido {quantidade} de {result['item_name']}. Agora tem {result['new_quantity']} no pedido."
-        return f"❌ Erro: Item {item_index} não encontrado."
+                return f"âœ… Removido {quantidade} de {result['item_name']}. Agora tem {result['new_quantity']} no pedido."
+        return f"âŒ Erro: Item {item_index} nÃ£o encontrado."
     else:
-        # Remoção COMPLETA - comportamento original
+        # RemoÃ§Ã£o COMPLETA - comportamento original
         success = remove_item_from_cart(telefone, idx_zero_based)
         if success:
-            return f"✅ Item {item_index} removido do pedido."
-        return f"❌ Erro: Item {item_index} não encontrado."
+            return f"âœ… Item {item_index} removido do pedido."
+        return f"âŒ Erro: Item {item_index} nÃ£o encontrado."
 
 
 # --- FERRAMENTAS DO CAIXA ---
@@ -259,7 +259,7 @@ def calcular_total_tool(telefone: str, taxa_entrega: float = 0.0) -> str:
     """
     items = get_cart_items(telefone)
     if not items:
-        return "❌ Pedido vazio. Não é possível calcular total."
+        return "âŒ Pedido vazio. NÃ£o Ã© possÃ­vel calcular total."
     
     subtotal = 0.0
     item_details = []
@@ -278,23 +278,23 @@ def calcular_total_tool(telefone: str, taxa_entrega: float = 0.0) -> str:
     total_final = round(subtotal + taxa_entrega, 2)
     
     res = (
-        f"📝 **Cálculo Oficial do Sistema:**\n"
+        f"ðŸ“ **CÃ¡lculo Oficial do Sistema:**\n"
         f"Subtotal: R$ {subtotal:.2f}\n"
         f"Taxa de Entrega: R$ {taxa_entrega:.2f}\n"
         f"----------------\n"
-        f"💰 **TOTAL FINAL: R$ {total_final:.2f}**"
+        f"ðŸ’° **TOTAL FINAL: R$ {total_final:.2f}**"
     )
     return res
 
 @tool
 def salvar_endereco_tool(telefone: str, endereco: str) -> str:
     """
-    Salva o endereço do cliente para usar depois no fechamento do pedido.
-    Use IMEDIATAMENTE quando o cliente informar o endereço (mesmo no início da conversa).
+    Salva o endereÃ§o do cliente para usar depois no fechamento do pedido.
+    Use IMEDIATAMENTE quando o cliente informar o endereÃ§o (mesmo no inÃ­cio da conversa).
     """
     if save_address(telefone, endereco):
-        return f"✅ Endereço salvo: {endereco}"
-    return "❌ Erro ao salvar endereço."
+        return f"âœ… EndereÃ§o salvo: {endereco}"
+    return "âŒ Erro ao salvar endereÃ§o."
 
 @tool
 def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_pagamento: str, itens_json: str, observacao: str = "", comprovante: str = "", taxa_entrega: float = 0.0) -> str:
@@ -305,12 +305,12 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
     Args:
     - cliente: Nome do cliente
     - telefone: Telefone (com DDD)
-    - endereco: Endereço de entrega completo
-    - forma_pagamento: Pix, Cartão ou Dinheiro
+    - endereco: EndereÃ§o de entrega completo
+    - forma_pagamento: Pix, CartÃ£o ou Dinheiro
     - itens_json: String em formato JSON com todos os itens, ex: [{"produto": "Arroz", "quantidade": 2.0, "preco": 20.0}]
-    - observacao: Observações extras (troco, etc)
+    - observacao: ObservaÃ§Ãµes extras (troco, etc)
     - comprovante: URL do comprovante PIX (se houver)
-    - taxa_entrega: Valor da taxa de entrega em reais (opcional, padrão 0)
+    - taxa_entrega: Valor da taxa de entrega em reais (opcional, padrÃ£o 0)
     """
     import json as json_lib
 
@@ -354,10 +354,10 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
     try:
         items = json_lib.loads(itens_json)
     except Exception as e:
-        return f"❌ Erro ao ler os itens do pedido: erro de formato JSON - {e}. Corrija o JSON e tente novamente."
+        return f"âŒ Erro ao ler os itens do pedido: erro de formato JSON - {e}. Corrija o JSON e tente novamente."
 
     if not isinstance(items, list) or not items:
-        return "❌ O pedido está vazio! Você deve repassar a lista de produtos confirmados."
+        return "âŒ O pedido estÃ¡ vazio! VocÃª deve repassar a lista de produtos confirmados."
 
     comprovante_salvo = get_comprovante(telefone)
     comprovante_final = comprovante or comprovante_salvo or ""
@@ -367,7 +367,7 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
 
     for idx, item in enumerate(items, 1):
         if not isinstance(item, dict):
-            return f"❌ Item {idx} inválido no JSON. Corrija e tente novamente."
+            return f"âŒ Item {idx} invÃ¡lido no JSON. Corrija e tente novamente."
 
         nome_produto = str(item.get("produto", item.get("nome_produto", "Produto"))).strip() or "Produto"
         preco = _to_decimal(item.get("preco"), "0")
@@ -382,11 +382,11 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
             preco_recuperado = _recover_price_from_search(nome_produto)
             if preco_recuperado > 0:
                 preco = preco_recuperado
-                logger.info(f"✨ [CHECKOUT] Preço recuperado no SQL para '{nome_produto}': R$ {preco:.2f}")
+                logger.info(f"âœ¨ [CHECKOUT] PreÃ§o recuperado no SQL para '{nome_produto}': R$ {preco:.2f}")
             else:
                 return (
-                    f"❌ Não consegui validar o preço de '{nome_produto}' para fechar o pedido. "
-                    "Use busca_produto_tool novamente e confirme o item/preço antes de finalizar."
+                    f"âŒ NÃ£o consegui validar o preÃ§o de '{nome_produto}' para fechar o pedido. "
+                    "Use busca_produto_tool novamente e confirme o item/preÃ§o antes de finalizar."
                 )
 
         valor_linha = (preco * quantidade).quantize(cents, rounding=ROUND_HALF_UP)
@@ -447,13 +447,13 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
         os.makedirs("logs", exist_ok=True)
         with open("logs/pedidos_audit.jsonl", "a", encoding="utf-8") as f:
             f.write(json_lib.dumps(audit_entry, ensure_ascii=False) + "\n")
-        logger.info(f"📋 [AUDIT] Pedido registrado para {telefone} - R$ {float(total):.2f}")
+        logger.info(f"ðŸ“‹ [AUDIT] Pedido registrado para {telefone} - R$ {float(total):.2f}")
     except Exception as audit_err:
-        logger.warning(f"⚠️ Falha no audit log: {audit_err}")
+        logger.warning(f"âš ï¸ Falha no audit log: {audit_err}")
 
     result = pedidos(json_body)
 
-    if "sucesso" in result.lower() or "✅" in result:
+    if "sucesso" in result.lower() or "âœ…" in result:
         # Ao concluir checkout, limpamos estado para evitar vazamento em novo pedido.
         mark_order_sent(telefone, result)
         clear_pending_confirmations(telefone)
@@ -462,13 +462,13 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
         clear_order_session(telefone)
         try:
             get_session_history(telefone).clear()
-            logger.info(f"🧹 Contexto da conversa limpo após finalização: {telefone}")
+            logger.info(f"ðŸ§¹ Contexto da conversa limpo apÃ³s finalizaÃ§Ã£o: {telefone}")
         except Exception as e:
-            logger.warning(f"Falha ao limpar contexto após finalização: {e}")
+            logger.warning(f"Falha ao limpar contexto apÃ³s finalizaÃ§Ã£o: {e}")
 
         return (
             f"{result}\n\n"
-            f"💰 **Valor Total Oficial:** R$ {float(total):.2f}\n"
+            f"ðŸ’° **Valor Total Oficial:** R$ {float(total):.2f}\n"
             "(O agente DEVE usar este valor na resposta)"
         )
 
@@ -483,7 +483,7 @@ def time_tool() -> str:
 
 @tool
 def search_history_tool(telefone: str, keyword: str = None) -> str:
-    """Busca mensagens anteriores do cliente com horários."""
+    """Busca mensagens anteriores do cliente com horÃ¡rios."""
     return search_message_history(telefone, keyword)
 
 # ============================================
@@ -492,21 +492,26 @@ def search_history_tool(telefone: str, keyword: str = None) -> str:
 
 VENDEDOR_TOOLS = [
     busca_produto_tool,
+    add_item_tool,
+    ver_pedido_tool,
+    remove_item_tool,
+    calcular_total_tool,
+    reset_pedido_tool,
     time_tool,
     salvar_endereco_tool,
     finalizar_pedido_tool,
 ]
 
 # ============================================
-# Funções de Carregamento de Prompts
+# FunÃ§Ãµes de Carregamento de Prompts
 # ============================================
 
 def load_prompt(filename: str) -> str:
-    """Carrega um prompt do diretório prompts/"""
+    """Carrega um prompt do diretÃ³rio prompts/"""
     base_dir = Path(__file__).resolve().parent
     prompt_path = base_dir / "prompts" / filename
     
-    logger.info(f"📄 Carregando prompt: {prompt_path}")
+    logger.info(f"ðŸ“„ Carregando prompt: {prompt_path}")
     
     try:
         text = prompt_path.read_text(encoding="utf-8")
@@ -518,16 +523,16 @@ def load_prompt(filename: str) -> str:
         raise
 
 # ============================================
-# Construção dos LLMs
+# ConstruÃ§Ã£o dos LLMs
 # ============================================
 
 def _build_llm(temperature: float = 0.1, model_override: str = None):
-    """Constrói um LLM baseado nas configurações."""
+    """ConstrÃ³i um LLM baseado nas configuraÃ§Ãµes."""
     model = model_override or getattr(settings, "llm_model", "gemini-1.5-flash")
     provider = getattr(settings, "llm_provider", "google")
     
     if provider == "google":
-        logger.debug(f"🚀 Usando Google Gemini: {model}")
+        logger.debug(f"ðŸš€ Usando Google Gemini: {model}")
         primary_llm = ChatGoogleGenerativeAI(
             model=model,
             api_key=settings.google_api_key,
@@ -545,10 +550,10 @@ def _build_llm(temperature: float = 0.1, model_override: str = None):
             max_retries=2,
         )
         
-        logger.debug("🛡️ Configurando fallback para gemini-2.5-flash")
+        logger.debug("ðŸ›¡ï¸ Configurando fallback para gemini-2.5-flash")
         return primary_llm.with_fallbacks([fallback_llm])
     else:
-        logger.debug(f"🚀 Usando OpenAI (compatível): {model}")
+        logger.debug(f"ðŸš€ Usando OpenAI (compatÃ­vel): {model}")
         
         client_kwargs = {}
         if settings.openai_api_base:
@@ -562,12 +567,12 @@ def _build_llm(temperature: float = 0.1, model_override: str = None):
         )
 
 def _build_fast_llm():
-    """Constrói um LLM rápido e leve para o Orquestrador."""
-    # Usa baixa temperatura para manter boa aderência às regras com leve flexibilidade.
+    """ConstrÃ³i um LLM rÃ¡pido e leve para o Orquestrador."""
+    # Usa baixa temperatura para manter boa aderÃªncia Ã s regras com leve flexibilidade.
     return _build_llm(temperature=0.1)
 
 # ============================================
-# Nós do Grafo (Agentes)
+# NÃ³s do Grafo (Agentes)
 # ============================================
 
 
@@ -582,7 +587,7 @@ def _extract_response(result: Any) -> str:
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            # Novo formato LangChain v1.x: content é lista de blocos
+            # Novo formato LangChain v1.x: content Ã© lista de blocos
             parts = []
             for block in content:
                 if isinstance(block, str):
@@ -622,7 +627,7 @@ def _is_close_intent(text: str) -> bool:
     t = (text or "").lower()
     patterns = [
         r"\bso isso\b",
-        r"\bs[oó] isso\b",
+        r"\bs[oÃ³] isso\b",
         r"\bpode fechar\b",
         r"\bfechar\b",
         r"\bfinalizar\b",
@@ -658,8 +663,8 @@ def _is_fresh_order_request(text: str) -> bool:
         r"\bdo zero\b",
         r"\bzerar pedido\b",
         r"\bzera (o )?pedido\b",
-        r"\brecome(c|ç)ar\b",
-        r"\bcome(c|ç)ar de novo\b",
+        r"\brecome(c|Ã§)ar\b",
+        r"\bcome(c|Ã§)ar de novo\b",
         r"\blimpa(r)? (o )?pedido\b",
         r"\besquece(r)? (o )?pedido\b",
         r"\boutro pedido\b",
@@ -673,13 +678,13 @@ def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
     lines = [ln for ln in (response or "").splitlines() if ln.strip()]
     blocked_terms = [
         "forma de pagamento",
-        "pix, cartão ou dinheiro",
+        "pix, cartÃ£o ou dinheiro",
         "pix, cartao ou dinheiro",
-        "já temos seu endereço",
+        "jÃ¡ temos seu endereÃ§o",
         "ja temos seu endereco",
         "se for finalizar",
         "podemos fechar",
-        "endereço da",
+        "endereÃ§o da",
         "endereco da",
     ]
     kept = []
@@ -690,7 +695,7 @@ def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
         kept.append(ln)
     out = "\n".join(kept).strip()
 
-    # Verificamos se há itens no carrinho (antes desta mensagem) para decidir o follow-up
+    # Verificamos se hÃ¡ itens no carrinho (antes desta mensagem) para decidir o follow-up
     cart_has_items = False
     if phone:
         try:
@@ -709,9 +714,90 @@ def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
                 out = re.sub(r"(?i)como posso (te|de) ajudar hoje\??", "", out).strip()
             out = (out + "\n\nDeseja mais alguma coisa ou podemos finalizar?").strip()
         elif "?" not in out:
-            # Se o carrinho estiver vazio, não adicionamos nada agora, e o agente não fez uma pergunta
+            # Se o carrinho estiver vazio, nÃ£o adicionamos nada agora, e o agente nÃ£o fez uma pergunta
             out = (out + "\n\nComo posso te ajudar hoje?").strip()
             
+    return out
+
+
+def _parse_brl_amount(value: str) -> Decimal:
+    raw = str(value or "").strip().replace(".", "").replace(",", ".")
+    try:
+        return Decimal(raw)
+    except Exception:
+        return Decimal("0")
+
+
+def _reconcile_estimated_total(response: str, phone: str = None) -> str:
+    """
+    Reconciliar o "Total estimado" para reduzir divergÃªncia de soma manual.
+    Prioridade:
+    1) Soma do carrinho atual (se disponÃ­vel)
+    2) Soma das linhas exibidas na resposta
+    """
+    if not response:
+        return response
+
+    total_line_pattern = re.compile(
+        r"(?im)^\s*(Total estimado(?: parcial)?):\s*R\$\s*([0-9\.,]+)\.?\s*$"
+    )
+    if not total_line_pattern.search(response):
+        return response
+
+    reconciled_total = Decimal("0")
+    used_cart = False
+
+    if phone:
+        try:
+            items = get_cart_items(phone) or []
+            if items:
+                used_cart = True
+                for item in items:
+                    preco = _parse_brl_amount(item.get("preco", 0))
+                    qtd = _parse_brl_amount(item.get("quantidade", 1))
+                    reconciled_total += (preco * qtd).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except Exception:
+            used_cart = False
+
+    if not used_cart:
+        line_vals = re.findall(r"(?im)^\s*-\s+.*?-\s*R\$\s*([0-9\.,]+)\s*$", response)
+        for v in line_vals:
+            reconciled_total += _parse_brl_amount(v)
+
+    if reconciled_total <= 0:
+        return response
+
+    total_fmt = f"{reconciled_total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):.2f}".replace(".", ",")
+    return total_line_pattern.sub(rf"\1: R$ {total_fmt}.", response)
+
+
+def _sanitize_out_of_context_followups(response: str) -> str:
+    """
+    Remove follow-up genÃ©rico ("Como posso te ajudar hoje?") em contexto
+    de fechamento/finalizaÃ§Ã£o para evitar quebra de fluxo.
+    """
+    if not response:
+        return response
+
+    out = response.strip()
+    low = out.lower()
+
+    has_close_context = any(
+        marker in low
+        for marker in [
+            "pedido foi finalizado",
+            "pedido de nÃºmero",
+            "pedido de numero",
+            "finalizado com sucesso",
+            "valor total oficial",
+            "forma de pagamento",
+        ]
+    )
+    if not has_close_context:
+        return out
+
+    out = re.sub(r"(?is)\n*\s*como posso (te|de) ajudar hoje\??\s*$", "", out).strip()
+    out = re.sub(r"(?is)\n*\s*deseja mais alguma coisa ou podemos finalizar\??\s*$", "", out).strip()
     return out
 
 # Orquestrador removido
@@ -720,21 +806,21 @@ def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
 
 def vendedor_node(state: AgentState) -> dict:
     """
-    Nó Vendedor: Agente especializado em vendas com prompt completo.
+    NÃ³ Vendedor: Agente especializado em vendas com prompt completo.
     """
-    logger.info("👩‍💼 [VENDEDOR] Processando...")
+    logger.info("ðŸ‘©â€ðŸ’¼ [VENDEDOR] Processando...")
     
     # set_current_phone(state["phone"]) # REMOVIDO: Contexto do analista
     
     prompt = load_prompt("atendente_core.md")
-    llm = _build_llm(temperature=0.1)  # Temperatura baixa para manter consistência nas regras
+    llm = _build_llm(temperature=0.1)  # Temperatura baixa para manter consistÃªncia nas regras
     
     # Criar agente ReAct com as ferramentas do vendedor
     agent = create_react_agent(llm, VENDEDOR_TOOLS, prompt=prompt)
     
-    logger.info(f"👩‍💼 [VENDEDOR] Agente criado. Invocando...")
+    logger.info(f"ðŸ‘©â€ðŸ’¼ [VENDEDOR] Agente criado. Invocando...")
     
-    # Configuração
+    # ConfiguraÃ§Ã£o
     config = {
         "configurable": {"thread_id": state["phone"]},
         "recursion_limit": 50
@@ -743,17 +829,17 @@ def vendedor_node(state: AgentState) -> dict:
     result = agent.invoke({"messages": state["messages"]}, config)
     response = _extract_response(result)
 
-    # Evita vazar mensagem técnica do executor para o cliente.
+    # Evita vazar mensagem tÃ©cnica do executor para o cliente.
     low = (response or "").lower()
     if "need more steps to process this request" in low:
-        logger.warning("⚠️ Resposta técnica por limite de passos detectada; aplicando fallback amigável.")
+        logger.warning("âš ï¸ Resposta tÃ©cnica por limite de passos detectada; aplicando fallback amigÃ¡vel.")
         response = (
             "Entendi. Vou seguir com isso agora: 1 cartela de Danone Ninho "
-            "(iogurte polpa). Confirmo já no seu pedido."
+            "(iogurte polpa). Confirmo jÃ¡ no seu pedido."
         )
 
-    # Guard rail: se o cliente não pediu para fechar, bloqueia pergunta de
-    # endereço/pagamento na mesma resposta de adição.
+    # Guard rail: se o cliente nÃ£o pediu para fechar, bloqueia pergunta de
+    # endereÃ§o/pagamento na mesma resposta de adiÃ§Ã£o.
     last_user_text = ""
     for msg in reversed(state.get("messages", [])):
         if isinstance(msg, HumanMessage):
@@ -762,7 +848,7 @@ def vendedor_node(state: AgentState) -> dict:
     if last_user_text and not _is_close_intent(last_user_text):
         response = _sanitize_premature_checkout(response, state["phone"])
 
-    logger.info(f"👩‍💼 [VENDEDOR] Resposta: {response[:100]}...")
+    logger.info(f"ðŸ‘©â€ðŸ’¼ [VENDEDOR] Resposta: {response[:100]}...")
 
     
     return {
@@ -775,25 +861,25 @@ def vendedor_node(state: AgentState) -> dict:
 
 
 # ============================================
-# Construção do Grafo
+# ConstruÃ§Ã£o do Grafo
 # ============================================
 
 def build_agent_graph():
-    """Constrói o StateGraph com a arquitetura de Agente Único."""
+    """ConstrÃ³i o StateGraph com a arquitetura de Agente Ãšnico."""
     
     graph = StateGraph(AgentState)
     
-    # Adicionar nó único
+    # Adicionar nÃ³ Ãºnico
     graph.add_node("vendedor", vendedor_node)
     
-    # Fluxo: START → Vendedor → END
+    # Fluxo: START â†’ Vendedor â†’ END
     graph.add_edge(START, "vendedor")
     graph.add_edge("vendedor", END)
     
     return graph.compile()
 
 # ============================================
-# Função Principal
+# FunÃ§Ã£o Principal
 # ============================================
 
 def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
@@ -806,11 +892,11 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
     lock_token = acquire_agent_lock(telefone)
     if not lock_token:
         return {
-            "output": "Estou finalizando sua última solicitação. Me manda só um instante e eu já te respondo.",
+            "output": "Estou finalizando sua Ãºltima solicitaÃ§Ã£o. Me manda sÃ³ um instante e eu jÃ¡ te respondo.",
             "error": "busy"
         }
 
-    # Evita vazamento de sugestões de turnos anteriores para o turno atual.
+    # Evita vazamento de sugestÃµes de turnos anteriores para o turno atual.
     try:
         clear_suggestions(telefone)
     except Exception:
@@ -827,9 +913,13 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
         clean_message = incoming_message.replace(media_match.group(0), "").strip()
         if not clean_message:
             clean_message = "Analise esta imagem/comprovante enviada."
-        logger.info(f"📸 Mídia detectada: {image_url}")
+        logger.info(f"ðŸ“¸ MÃ­dia detectada: {image_url}")
 
-    # 2) Injeta contexto de sessão quando não veio do buffer.
+    # ConfirmaÃ§Ãµes muito curtas no WhatsApp.
+    if (clean_message or "").strip() in {"+", "++", "👍", "👍🏻", "👍🏽", "👍🏿"}:
+        clean_message = "sim"
+
+    # 2) Injeta contexto de sessÃ£o quando nÃ£o veio do buffer.
     runtime_message = clean_message
     if not runtime_message.strip().startswith("[SESS"):
         try:
@@ -837,7 +927,7 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
             if order_ctx:
                 runtime_message = f"{order_ctx}\n\n{runtime_message}" if runtime_message else order_ctx
         except Exception as e:
-            logger.warning(f"⚠️ Falha ao obter contexto de sessão: {e}")
+            logger.warning(f"âš ï¸ Falha ao obter contexto de sessÃ£o: {e}")
 
     session_directive, runtime_user_text = _extract_session_directive(runtime_message)
     if runtime_user_text:
@@ -845,7 +935,7 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
 
     should_reset_context = _session_indicates_new_order(session_directive) or _is_fresh_order_request(clean_message)
 
-    # 3) Histórico híbrido (Redis contexto + Postgres log).
+    # 3) HistÃ³rico hÃ­brido (Redis contexto + Postgres log).
     history_handler = HybridChatMessageHistory(
         session_id=telefone,
         redis_ttl=getattr(settings, "redis_ttl", 2400),
@@ -853,7 +943,7 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
 
     previous_messages = []
     if should_reset_context:
-        logger.info(f"🆕 Novo pedido detectado para {telefone}: limpando contexto anterior.")
+        logger.info(f"ðŸ†• Novo pedido detectado para {telefone}: limpando contexto anterior.")
         try:
             clear_cart(telefone)
             clear_order_session(telefone)
@@ -861,46 +951,46 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
             clear_suggestions(telefone)
             start_order_session(telefone)
         except Exception as e:
-            logger.warning(f"⚠️ Falha parcial limpando estado de pedido: {e}")
+            logger.warning(f"âš ï¸ Falha parcial limpando estado de pedido: {e}")
 
         try:
             history_handler.clear()
         except Exception as e:
-            logger.warning(f"⚠️ Falha ao limpar histórico híbrido: {e}")
+            logger.warning(f"âš ï¸ Falha ao limpar histÃ³rico hÃ­brido: {e}")
     else:
         try:
             previous_messages = history_handler.messages
         except Exception as e:
-            logger.error(f"Erro ao buscar histórico híbrido: {e}")
+            logger.error(f"Erro ao buscar histÃ³rico hÃ­brido: {e}")
 
-    # 4) Persistir mensagem do usuário (sem tags internas de sessão).
+    # 4) Persistir mensagem do usuÃ¡rio (sem tags internas de sessÃ£o).
     user_message_for_history = clean_message or incoming_message
     try:
         history_handler.add_user_message(user_message_for_history)
     except Exception as e:
-        logger.error(f"Erro ao salvar msg user no histórico: {e}")
+        logger.error(f"Erro ao salvar msg user no histÃ³rico: {e}")
 
     try:
-        # CONSTRUIR O GRAFO A CADA EXECUÇÃO para garantir ISOLAMENTO TOTAL.
+        # CONSTRUIR O GRAFO A CADA EXECUÃ‡ÃƒO para garantir ISOLAMENTO TOTAL.
         graph = build_agent_graph()
 
         # 5) Construir mensagem com contexto.
         hora_atual = get_current_time()
-        contexto = f"[TELEFONE_CLIENTE: {telefone}]\n[HORÁRIO_ATUAL: {hora_atual}]\n"
+        contexto = f"[TELEFONE_CLIENTE: {telefone}]\n[HORÃRIO_ATUAL: {hora_atual}]\n"
 
         if session_directive:
             contexto += f"{session_directive}\n"
         if should_reset_context:
-            contexto += "[SESSÃO] Considere apenas os itens desta nova conversa. Ignore pedidos anteriores.\n"
+            contexto += "[SESSÃƒO] Considere apenas os itens desta nova conversa. Ignore pedidos anteriores.\n"
 
         if image_url:
             contexto += f"[URL_IMAGEM: {image_url}]\n"
 
         msg_norm = (clean_message or "").strip().lower()
-        is_greeting_like = bool(re.match(r"^(oi|ol[aá]|bom dia|boa tarde|boa noite|opa|e ai|eai)\b", msg_norm))
+        is_greeting_like = bool(re.match(r"^(oi|ol[aÃ¡]|bom dia|boa tarde|boa noite|opa|e ai|eai)\b", msg_norm))
         is_first_turn = len(previous_messages) == 0
         if is_first_turn and not is_greeting_like:
-            contexto += "[INSTRUÇÃO_DE_ESTILO: cliente iniciou com pedido direto. Faça uma saudação curta e natural (máx 1 linha), depois responda objetivamente.]\n"
+            contexto += "[INSTRUÃ‡ÃƒO_DE_ESTILO: cliente iniciou com pedido direto. FaÃ§a uma saudaÃ§Ã£o curta e natural (mÃ¡x 1 linha), depois responda objetivamente.]\n"
 
         # 5.1) Consultar dados cadastrados do cliente.
         try:
@@ -915,24 +1005,24 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
                 endereco_full = ", ".join(p for p in [endereco_cli, bairro_cli, cidade_cli] if p.strip())
 
                 if is_first_turn:
-                    contexto += f"[CLIENTE_CADASTRADO: {nome_cli} | Endereço: {endereco_full} | Pedidos anteriores: {total_ped}]\n[SESSÃO] Nova conversa.\n"
+                    contexto += f"[CLIENTE_CADASTRADO: {nome_cli} | EndereÃ§o: {endereco_full} | Pedidos anteriores: {total_ped}]\n[SESSÃƒO] Nova conversa.\n"
                 else:
-                    contexto += f"[DADOS DO CLIENTE PARA ENTREGA: {nome_cli} | Endereço: {endereco_full}]\n"
+                    contexto += f"[DADOS DO CLIENTE PARA ENTREGA: {nome_cli} | EndereÃ§o: {endereco_full}]\n"
 
-                logger.info(f"👤 Cliente cadastrado: {nome_cli} ({total_ped} pedidos)")
+                logger.info(f"ðŸ‘¤ Cliente cadastrado: {nome_cli} ({total_ped} pedidos)")
             else:
                 if is_first_turn:
-                    contexto += "[CLIENTE_NOVO: não cadastrado]\n[SESSÃO] Nova conversa.\n"
+                    contexto += "[CLIENTE_NOVO: nÃ£o cadastrado]\n[SESSÃƒO] Nova conversa.\n"
         except Exception as e:
-            logger.warning(f"⚠️ Falha ao consultar cliente: {e}")
+            logger.warning(f"âš ï¸ Falha ao consultar cliente: {e}")
             if is_first_turn:
-                contexto += "[CLIENTE_NOVO: não cadastrado]\n[SESSÃO] Nova conversa.\n"
+                contexto += "[CLIENTE_NOVO: nÃ£o cadastrado]\n[SESSÃƒO] Nova conversa.\n"
 
-        # Expansão de mensagens curtas.
+        # ExpansÃ£o de mensagens curtas.
         mensagem_expandida = clean_message
         msg_lower = (clean_message or "").lower().strip()
 
-        if msg_lower in ["sim", "s", "ok", "pode", "isso", "quero", "beleza", "blz", "bora", "vamos"]:
+        if msg_lower in ["sim", "s", "ok", "pode", "isso", "quero", "beleza", "blz", "bora", "vamos", "+", "++"]:
             ultima_pergunta_ia = ""
             for msg in reversed(previous_messages):
                 if isinstance(msg, AIMessage) and msg.content:
@@ -944,11 +1034,11 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
             if ultima_pergunta_ia:
                 mensagem_expandida = (
                     f"O cliente respondeu '{clean_message}' CONFIRMANDO. Sua mensagem anterior foi: "
-                    f"\"{ultima_pergunta_ia}...\". Se você sugeriu produtos, use busca_produto_tool para "
-                    "confirmar preço e atualizar o pedido no contexto. Não invente preço."
+                    f"\"{ultima_pergunta_ia}...\". Se vocÃª sugeriu produtos, use busca_produto_tool para "
+                    "confirmar preÃ§o e atualizar o pedido no contexto. NÃ£o invente preÃ§o."
                 )
-                logger.info(f"🔄 Mensagem curta expandida: '{clean_message}'")
-        elif msg_lower in ["nao", "não", "n", "nope", "nao quero", "não quero"]:
+                logger.info(f"ðŸ”„ Mensagem curta expandida: '{clean_message}'")
+        elif msg_lower in ["nao", "nÃ£o", "n", "nope", "nao quero", "nÃ£o quero"]:
             mensagem_expandida = f"O cliente respondeu '{clean_message}' (NEGATIVO). Pergunte se precisa de mais alguma coisa."
 
         contexto += "\n"
@@ -971,7 +1061,7 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
             "final_response": ""
         }
 
-        logger.info(f"📨 Enviando {len(all_messages)} mensagens para o grafo")
+        logger.info(f"ðŸ“¨ Enviando {len(all_messages)} mensagens para o grafo")
         config = {"configurable": {"thread_id": telefone}}
 
         # 8) Executar o grafo.
@@ -979,15 +1069,18 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
         output = result.get("final_response", "")
 
         if not output or not output.strip():
-            logger.warning("⚠️ Resposta vazia, tentando extrair das mensagens")
+            logger.warning("âš ï¸ Resposta vazia, tentando extrair das mensagens")
             output = _extract_response({"messages": result.get("messages", [])})
 
         if not output or not output.strip():
             output = "Desculpe, tive um problema ao processar. Pode repetir por favor?"
 
-        logger.info(f"✅ [AGENT] Resposta: {output[:200]}...")
+        output = _reconcile_estimated_total(output, telefone)
+        output = _sanitize_out_of_context_followups(output)
 
-        # 9) Salvar histórico (IA).
+        logger.info(f"âœ… [AGENT] Resposta: {output[:200]}...")
+
+        # 9) Salvar histÃ³rico (IA).
         try:
             history_handler.add_ai_message(output)
         except Exception as e:
@@ -997,7 +1090,7 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Falha agente: {e}", exc_info=True)
-        return {"output": "Tive um problema técnico, tente novamente.", "error": str(e)}
+        return {"output": "Tive um problema tÃ©cnico, tente novamente.", "error": str(e)}
     finally:
         try:
             release_agent_lock(telefone, lock_token)
@@ -1010,3 +1103,5 @@ def get_session_history(session_id: str) -> HybridChatMessageHistory:
 
 # Alias para compatibilidade
 run_agent = run_agent_langgraph
+
+
