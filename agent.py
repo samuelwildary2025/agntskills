@@ -634,6 +634,29 @@ def _extract_response(result: Any) -> str:
     return str(result)
 
 
+def _response_has_price_list(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    return re.search(r"(?im)^\s*-\s*\d+.*-\s*R\$\s*[0-9\.,]+\s*$", t) is not None
+
+
+def _result_used_tools(result: Any) -> bool:
+    """
+    Detecta se o ciclo do agente executou ao menos uma tool call.
+    """
+    if not isinstance(result, dict):
+        return False
+    msgs = result.get("messages") or []
+    for m in msgs:
+        # LangChain costuma expor ToolMessage com type='tool'
+        msg_type = str(getattr(m, "type", "") or "").lower()
+        cls_name = m.__class__.__name__.lower()
+        if msg_type == "tool" or "toolmessage" in cls_name:
+            return True
+    return False
+
+
 def _message_content_to_text(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -907,6 +930,35 @@ def vendedor_node(state: AgentState) -> dict:
     
     result = agent.invoke({"messages": state["messages"]}, config)
     response = _extract_response(result)
+    used_tools = _result_used_tools(result)
+
+    # Guard-rail anti-preço inventado:
+    # Se vier lista com R$ sem uso de tools, forçamos um retry único com instrução crítica.
+    if _response_has_price_list(response) and not used_tools:
+        logger.warning("⚠️ Resposta com preços sem tool call detectada. Forçando retry com uso obrigatório de tools.")
+        strict_instruction = HumanMessage(
+            content=(
+                "[INSTRUÇÃO CRÍTICA DE EXECUÇÃO] Sua resposta anterior trouxe preços sem executar ferramentas. "
+                "Refaça AGORA obrigatoriamente usando tools: para cada item do cliente, use busca_produto_tool, "
+                "depois add_item_tool, e só então monte o resumo com valores reais do banco. "
+                "É proibido estimar/inventar preços."
+            )
+        )
+        retry_messages = list(state.get("messages", [])) + [strict_instruction]
+        retry_result = agent.invoke({"messages": retry_messages}, config)
+        retry_response = _extract_response(retry_result)
+        retry_used_tools = _result_used_tools(retry_result)
+        if retry_used_tools:
+            result = retry_result
+            response = retry_response
+            used_tools = True
+            logger.info("✅ Retry obteve tool calls e substituiu resposta anterior.")
+        else:
+            logger.error("❌ Retry sem tool calls. Bloqueando resposta com preços não validados.")
+            response = (
+                "Recebi sua lista, mas preciso validar os itens no estoque para te passar valores corretos. "
+                "Vou processar item a item e te retorno em seguida."
+            )
 
     # Evita vazar mensagem técnica do executor para o cliente.
     low = (response or "").lower()
