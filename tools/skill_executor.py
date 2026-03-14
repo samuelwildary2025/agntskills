@@ -3,6 +3,7 @@ import json
 import unicodedata
 import difflib
 from tools.search_router import search_products
+from tools.product_lexicon import suggest_queries_from_lexicon
 from pathlib import Path
 
 # Carregar aliases da skill normalizar_termos
@@ -413,8 +414,21 @@ def buscar_e_validar(telefone: str, query: str) -> str:
             if c and c.lower() not in {x.lower() for x in candidate_queries}:
                 candidate_queries.append(c)
 
+        # Fallback inteligente com léxico do relatório tratado (nomes reais do cadastro).
+        try:
+            lexicon_hits = suggest_queries_from_lexicon(query_original, limit=4, min_score=0.72)
+            for name, score in lexicon_hits:
+                c = (name or "").strip()
+                if not c:
+                    continue
+                if c.lower() not in {x.lower() for x in candidate_queries}:
+                    candidate_queries.append(c)
+                    logger.info(f"🧠 Léxico sugeriu: '{query_original}' -> '{c}' (score={score:.2f})")
+        except Exception as e:
+            logger.warning(f"⚠️ Falha no fallback do léxico para '{query_original}': {e}")
+
     merged = {}
-    for idx, cq in enumerate(candidate_queries[:4]):
+    for idx, cq in enumerate(candidate_queries[:6]):
         if idx > 0:
             logger.info(f"🔄 Retry Busca Inteligente: '{query_original}' -> '{cq}'")
         _, rows = _run_search_for_item(cq, telefone)
