@@ -415,17 +415,47 @@ def buscar_e_validar(telefone: str, query: str) -> str:
                 candidate_queries.append(c)
 
         # Fallback inteligente com léxico do relatório tratado (nomes reais do cadastro).
-        try:
-            lexicon_hits = suggest_queries_from_lexicon(query_original, limit=4, min_score=0.72)
-            for name, score in lexicon_hits:
-                c = (name or "").strip()
-                if not c:
-                    continue
-                if c.lower() not in {x.lower() for x in candidate_queries}:
-                    candidate_queries.append(c)
-                    logger.info(f"🧠 Léxico sugeriu: '{query_original}' -> '{c}' (score={score:.2f})")
-        except Exception as e:
-            logger.warning(f"⚠️ Falha no fallback do léxico para '{query_original}': {e}")
+        def _accept_lexicon_candidate(candidate_name: str) -> bool:
+            name_tokens = _tokens_for_intent(candidate_name)
+            salient_tokens = list(salient)
+            if not name_tokens or not salient_tokens:
+                return False
+
+            name_set = set(name_tokens)
+            salient_set = set(salient_tokens)
+            overlap = len(name_set & salient_set)
+            if len(salient_set) >= 2 and overlap < 2:
+                return False
+
+            first_tokens = set(name_tokens[:2])
+            if not (first_tokens & salient_set):
+                return False
+
+            noisy_object_tokens = {
+                "tapete",
+                "porta",
+                "suporte",
+                "organizador",
+                "cabide",
+                "prateleira",
+            }
+            if (name_set & noisy_object_tokens) and not (salient_set & noisy_object_tokens):
+                return False
+
+            return True
+
+        if len(salient) >= 2:
+            try:
+                lexicon_hits = suggest_queries_from_lexicon(query_original, limit=4, min_score=0.78)
+                for name, score in lexicon_hits:
+                    c = (name or "").strip()
+                    if not c or not _accept_lexicon_candidate(c):
+                        continue
+                    if c.lower() not in {x.lower() for x in candidate_queries}:
+                        candidate_queries.append(c)
+                        logger.info(f"Lexico sugeriu: '{query_original}' -> '{c}' (score={score:.2f})")
+            except Exception as e:
+                logger.warning(f"Falha no fallback do lexico para '{query_original}': {e}")
 
     merged = {}
     for idx, cq in enumerate(candidate_queries[:6]):

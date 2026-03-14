@@ -890,12 +890,28 @@ def _sanitize_out_of_context_followups(response: str) -> str:
     if not has_close_context:
         return out
 
+    has_finalized_context = any(
+        marker in low
+        for marker in [
+            "pedido foi finalizado",
+            "pedido de numero",
+            "finalizado com sucesso",
+            "valor total oficial",
+        ]
+    )
+
     filtered_lines = []
     for ln in out.splitlines():
         norm_ln = _normalize_text_for_match(ln)
         if re.search(r"^\s*como posso (te|de) ajudar hoje\??\s*$", norm_ln):
             continue
         if re.search(r"^\s*deseja mais alguma coisa ou podemos finalizar\??\s*$", norm_ln):
+            continue
+        if has_finalized_context and (
+            "forma de pagamento" in norm_ln
+            or "pix, cartao ou dinheiro" in norm_ln
+            or "pix, cartão ou dinheiro" in norm_ln
+        ):
             continue
         filtered_lines.append(ln)
 
@@ -1149,7 +1165,8 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
         msg_norm = (clean_message or "").strip().lower()
         is_greeting_like = bool(re.match(r"^(oi|ol[aÃ¡]|bom dia|boa tarde|boa noite|opa|e ai|eai)\b", msg_norm))
         is_first_turn = len(previous_messages) == 0
-        if is_first_turn and not is_greeting_like:
+        is_new_order_session = _session_indicates_new_order(session_directive)
+        if is_first_turn and is_new_order_session and not is_greeting_like:
             contexto += "[INSTRUÃ‡ÃƒO_DE_ESTILO: cliente iniciou com pedido direto. FaÃ§a uma saudaÃ§Ã£o curta e natural (mÃ¡x 1 linha), depois responda objetivamente.]\n"
 
         # 5.1) Consultar dados cadastrados do cliente.
@@ -1164,18 +1181,18 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
                 total_ped = cliente_data.get("total_pedidos", 0)
                 endereco_full = ", ".join(p for p in [endereco_cli, bairro_cli, cidade_cli] if p.strip())
 
-                if is_first_turn:
+                if is_first_turn and is_new_order_session:
                     contexto += f"[CLIENTE_CADASTRADO: {nome_cli} | EndereÃ§o: {endereco_full} | Pedidos anteriores: {total_ped}]\n[SESSÃƒO] Nova conversa.\n"
                 else:
                     contexto += f"[DADOS DO CLIENTE PARA ENTREGA: {nome_cli} | EndereÃ§o: {endereco_full}]\n"
 
                 logger.info(f"ðŸ‘¤ Cliente cadastrado: {nome_cli} ({total_ped} pedidos)")
             else:
-                if is_first_turn:
+                if is_first_turn and is_new_order_session:
                     contexto += "[CLIENTE_NOVO: nÃ£o cadastrado]\n[SESSÃƒO] Nova conversa.\n"
         except Exception as e:
             logger.warning(f"âš ï¸ Falha ao consultar cliente: {e}")
-            if is_first_turn:
+            if is_first_turn and is_new_order_session:
                 contexto += "[CLIENTE_NOVO: nÃ£o cadastrado]\n[SESSÃƒO] Nova conversa.\n"
 
         # ExpansÃ£o de mensagens curtas.

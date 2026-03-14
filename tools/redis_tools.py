@@ -6,6 +6,7 @@ import redis
 import time
 import uuid
 import re
+import unicodedata
 from threading import Lock
 from typing import Optional, Dict, List, Tuple
 from config.settings import settings
@@ -563,6 +564,53 @@ def clear_order_session(telefone: str) -> bool:
         return False
 
 
+def _normalize_text_for_intent(text: str) -> str:
+    raw = (text or "").strip().lower()
+    if not raw:
+        return ""
+    norm = unicodedata.normalize("NFKD", raw)
+    no_acc = "".join(ch for ch in norm if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", no_acc).strip()
+
+
+def _is_post_checkout_followup_message(mensagem: str) -> bool:
+    """
+    Detecta mensagens curtas típicas de follow-up após finalização
+    (ex.: forma de pagamento enviada atrasada, "só isso", "+").
+    """
+    msg = _normalize_text_for_intent(mensagem)
+    if not msg:
+        return False
+
+    if re.fullmatch(r"\+{1,3}", msg):
+        return True
+
+    # Se vier com números, tende a ser novo pedido/lista.
+    if re.search(r"\d", msg):
+        return False
+
+    confirmations = {
+        "so isso",
+        "so isso mesmo",
+        "isso mesmo",
+        "ok",
+        "blz",
+        "beleza",
+        "confirmo",
+        "confirmado",
+    }
+    if msg in confirmations:
+        return True
+
+    payment_patterns = [
+        r"^(pix|dinheiro|cartao|credito|debito)$",
+        r"^(cartao de credito|cartao de debito)$",
+        r"^(pagar|pagamento)\s+(no|via)?\s*(pix|dinheiro|cartao|credito|debito)$",
+        r"^forma de pagamento[: ]*(pix|dinheiro|cartao|credito|debito)$",
+    ]
+    return any(re.fullmatch(pattern, msg) for pattern in payment_patterns)
+
+
 def get_order_context(telefone: str, mensagem: str = "") -> str:
     """
     Retorna o contexto de pedido para injetar no agente.
@@ -598,6 +646,14 @@ def get_order_context(telefone: str, mensagem: str = "") -> str:
                 was_completed = client.get(completed_key) is not None
             except:
                 pass
+
+        # Mensagens tardias de pagamento/confirmação não devem abrir novo pedido.
+        if was_completed and _is_post_checkout_followup_message(mensagem):
+            return (
+                "[SESSÃO] Pedido já finalizado recentemente. Não inicie novo pedido, "
+                "não cumprimente e não finalize novamente. Informe que o pedido anterior "
+                "já foi concluído e pergunte apenas se o cliente deseja abrir um novo pedido."
+            )
         
         # Iniciar nova sessão
         start_order_session(telefone)
