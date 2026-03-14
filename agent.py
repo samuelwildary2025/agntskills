@@ -22,7 +22,7 @@ import json
 
 from config.settings import settings
 from config.logger import setup_logger
-from tools.http_tools import estoque, pedidos, alterar, consultar_encarte
+from tools.http_tools import estoque, pedidos, alterar, consultar_encarte, consultar_cliente
 
 from tools.time_tool import get_current_time, search_message_history
 from tools.redis_tools import (
@@ -46,6 +46,9 @@ from tools.redis_tools import (
     resolve_pending_confirmation,
     clear_pending_confirmations,
     get_order_context,
+    get_order_flow_state,
+    set_order_flow_state,
+    clear_order_flow_state,
 )
 from memory.hybrid_memory import HybridChatMessageHistory
 
@@ -190,6 +193,7 @@ def reset_pedido_tool(telefone: str) -> str:
     clear_comprovante(telefone)
     clear_suggestions(telefone)
     clear_pending_confirmations(telefone)
+    clear_order_flow_state(telefone)
     start_order_session(telefone)
     return "âœ… Pedido zerado com sucesso! Pode me enviar a nova lista de itens."
 
@@ -297,22 +301,17 @@ def salvar_endereco_tool(telefone: str, endereco: str) -> str:
         return f"âœ… EndereÃ§o salvo: {endereco}"
     return "âŒ Erro ao salvar endereÃ§o."
 
-@tool
-def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_pagamento: str, itens_json: str, observacao: str = "", comprovante: str = "", taxa_entrega: float = 0.0) -> str:
-    """
-    Finalizar o pedido enviando TODOS os itens confirmados.
-    Use quando o cliente confirmar que quer fechar a compra e repasse todos os itens do contexto da conversa.
-    
-    Args:
-    - cliente: Nome do cliente
-    - telefone: Telefone (com DDD)
-    - endereco: EndereÃ§o de entrega completo
-    - forma_pagamento: Pix, CartÃ£o ou Dinheiro
-    - itens_json: String em formato JSON com todos os itens, ex: [{"produto": "Arroz", "quantidade": 2.0, "preco": 20.0}]
-    - observacao: ObservaÃ§Ãµes extras (troco, etc)
-    - comprovante: URL do comprovante PIX (se houver)
-    - taxa_entrega: Valor da taxa de entrega em reais (opcional, padrÃ£o 0)
-    """
+def _finalizar_pedido_core(
+    cliente: str,
+    telefone: str,
+    endereco: str,
+    forma_pagamento: str,
+    itens_json: str,
+    observacao: str = "",
+    comprovante: str = "",
+    taxa_entrega: float = 0.0,
+) -> str:
+    """Core deterministico de checkout, usado pelas ferramentas de finalizacao."""
     import json as json_lib
 
     cents = Decimal("0.01")
@@ -485,6 +484,7 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
         clear_suggestions(telefone)
         clear_cart(telefone)
         clear_order_session(telefone)
+        clear_order_flow_state(telefone)
         try:
             get_session_history(telefone).clear()
             logger.info(f"ðŸ§¹ Contexto da conversa limpo apÃ³s finalizaÃ§Ã£o: {telefone}")
@@ -498,6 +498,74 @@ def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_paga
         )
 
     return result
+
+
+@tool
+def finalizar_pedido_tool(cliente: str, telefone: str, endereco: str, forma_pagamento: str, itens_json: str, observacao: str = "", comprovante: str = "", taxa_entrega: float = 0.0) -> str:
+    """
+    Finalizar o pedido enviando TODOS os itens confirmados.
+    Use quando o cliente confirmar que quer fechar a compra e repasse todos os itens do contexto da conversa.
+    
+    Args:
+    - cliente: Nome do cliente
+    - telefone: Telefone (com DDD)
+    - endereco: EndereÃ§o de entrega completo
+    - forma_pagamento: Pix, CartÃ£o ou Dinheiro
+    - itens_json: String em formato JSON com todos os itens, ex: [{"produto": "Arroz", "quantidade": 2.0, "preco": 20.0}]
+    - observacao: ObservaÃ§Ãµes extras (troco, etc)
+    - comprovante: URL do comprovante PIX (se houver)
+    - taxa_entrega: Valor da taxa de entrega em reais (opcional, padrÃ£o 0)
+    """
+    return _finalizar_pedido_core(
+        cliente=cliente,
+        telefone=telefone,
+        endereco=endereco,
+        forma_pagamento=forma_pagamento,
+        itens_json=itens_json,
+        observacao=observacao,
+        comprovante=comprovante,
+        taxa_entrega=taxa_entrega,
+    )
+
+
+@tool
+def finalizar_pedido_atual_tool(
+    telefone: str,
+    forma_pagamento: str,
+    cliente: str = "",
+    endereco: str = "",
+    observacao: str = "",
+    comprovante: str = "",
+    taxa_entrega: float = 0.0,
+) -> str:
+    """
+    Finaliza usando o carrinho atual do sistema.
+    Prefira esta ferramenta quando os itens ja estiverem confirmados no carrinho e o cliente
+    apenas confirmar endereco e forma de pagamento.
+    """
+    telefone = normalize_phone(telefone)
+    items = get_cart_items(telefone) or []
+    if not items:
+        return "âŒ O carrinho atual estÃ¡ vazio. Adicione os itens antes de finalizar."
+
+    cliente_data = consultar_cliente(telefone) or {}
+    cliente_resolvido = str(cliente or cliente_data.get("nome", "") or "").strip()
+
+    endereco_padrao = _build_customer_address(cliente_data)
+    endereco_salvo = str(get_saved_address(telefone) or "").strip()
+    endereco_resolvido = str(endereco or endereco_salvo or endereco_padrao or "").strip()
+
+    itens_json = json.dumps(items, ensure_ascii=False)
+    return _finalizar_pedido_core(
+        cliente=cliente_resolvido,
+        telefone=telefone,
+        endereco=endereco_resolvido,
+        forma_pagamento=forma_pagamento,
+        itens_json=itens_json,
+        observacao=observacao,
+        comprovante=comprovante,
+        taxa_entrega=taxa_entrega,
+    )
 
 # --- FERRAMENTAS COMPARTILHADAS ---
 
@@ -524,6 +592,7 @@ VENDEDOR_TOOLS = [
     reset_pedido_tool,
     time_tool,
     salvar_endereco_tool,
+    finalizar_pedido_atual_tool,
     finalizar_pedido_tool,
 ]
 
@@ -732,6 +801,249 @@ def _is_fresh_order_request(text: str) -> bool:
         r"\boutro pedido\b",
     ]
     return any(re.search(p, low) for p in patterns)
+
+
+FLOW_BUILDING = "BUILDING"
+FLOW_AWAITING_ADDRESS_CONFIRMATION = "AWAITING_ADDRESS_CONFIRMATION"
+FLOW_AWAITING_CUSTOMER_DETAILS = "AWAITING_CUSTOMER_DETAILS"
+FLOW_AWAITING_PAYMENT = "AWAITING_PAYMENT"
+FLOW_COMPLETED = "COMPLETED"
+
+
+def _build_customer_address(cliente_data: Dict[str, Any] | None) -> str:
+    if not cliente_data:
+        return ""
+    endereco_cli = str(cliente_data.get("endereco", "") or "").strip()
+    bairro_cli = str(cliente_data.get("bairro", "") or "").strip()
+    cidade_cli = str(cliente_data.get("cidade", "") or "").strip()
+    return ", ".join(part for part in [endereco_cli, bairro_cli, cidade_cli] if part)
+
+
+def _is_affirmative_message(text: str) -> bool:
+    t = _normalize_text_for_match(text)
+    return t in {
+        "sim",
+        "s",
+        "ok",
+        "okay",
+        "blz",
+        "beleza",
+        "isso",
+        "isso mesmo",
+        "confirmo",
+        "confirmado",
+        "pode",
+        "pode sim",
+        "certo",
+        "+",
+        "++",
+    }
+
+
+def _is_payment_message(text: str) -> bool:
+    t = _normalize_text_for_match(text)
+    return any(
+        re.fullmatch(pattern, t)
+        for pattern in [
+            r"(pix|dinheiro|cartao|debito|credito)",
+            r"cartao de (credito|debito)",
+            r"pagar (no|via)? ?(pix|dinheiro|cartao|debito|credito)",
+        ]
+    )
+
+
+def _looks_like_customer_details(text: str) -> bool:
+    t = _normalize_text_for_match(text)
+    if len(t) < 12:
+        return False
+    address_markers = [
+        "rua",
+        "av",
+        "avenida",
+        "travessa",
+        "bairro",
+        "casa",
+        "numero",
+        "padre",
+        "centro",
+    ]
+    has_address_marker = any(marker in t for marker in address_markers)
+    has_number = bool(re.search(r"\d", t))
+    has_separator = "," in (text or "") or "-" in (text or "")
+    return (has_address_marker and has_number) or (has_number and has_separator)
+
+
+def _looks_like_order_items(text: str) -> bool:
+    raw = text or ""
+    t = _normalize_text_for_match(raw)
+    if not t or _is_payment_message(t) or _is_affirmative_message(t):
+        return False
+    if _looks_like_customer_details(raw):
+        return False
+    if "\n" in raw:
+        return True
+    if re.search(r"\b\d+\s+[a-z]", t):
+        return True
+    return any(
+        marker in t
+        for marker in [
+            "acrescenta",
+            "adiciona",
+            "adicionar",
+            "inclui",
+            "incluir",
+            "coloca",
+            "colocar",
+            "manda mais",
+            "quero mais",
+            "mais um",
+            "mais uma",
+        ]
+    )
+
+
+def _advance_order_flow_state(
+    current_stage: str,
+    clean_message: str,
+    has_cart_items: bool,
+    customer_has_address: bool,
+) -> str:
+    if current_stage == FLOW_COMPLETED:
+        return FLOW_COMPLETED
+
+    if not has_cart_items:
+        return FLOW_BUILDING
+
+    stage = current_stage or FLOW_BUILDING
+
+    if stage == FLOW_AWAITING_ADDRESS_CONFIRMATION:
+        if _looks_like_order_items(clean_message):
+            return FLOW_BUILDING
+        if _looks_like_customer_details(clean_message):
+            return FLOW_AWAITING_PAYMENT
+        if _is_affirmative_message(clean_message):
+            return FLOW_AWAITING_PAYMENT
+        return FLOW_AWAITING_ADDRESS_CONFIRMATION
+
+    if stage == FLOW_AWAITING_CUSTOMER_DETAILS:
+        if _looks_like_order_items(clean_message):
+            return FLOW_BUILDING
+        if _looks_like_customer_details(clean_message):
+            return FLOW_AWAITING_PAYMENT
+        return FLOW_AWAITING_CUSTOMER_DETAILS
+
+    if stage == FLOW_AWAITING_PAYMENT:
+        if _looks_like_order_items(clean_message):
+            return FLOW_BUILDING
+        if _is_payment_message(clean_message):
+            return FLOW_AWAITING_PAYMENT
+        return FLOW_AWAITING_PAYMENT
+
+    if _is_close_intent(clean_message):
+        if customer_has_address:
+            return FLOW_AWAITING_ADDRESS_CONFIRMATION
+        return FLOW_AWAITING_CUSTOMER_DETAILS
+
+    return FLOW_BUILDING
+
+
+def _build_order_flow_directive(
+    stage: str,
+    clean_message: str,
+    has_cart_items: bool,
+    customer_name: str,
+    customer_address: str,
+) -> str:
+    if stage == FLOW_COMPLETED:
+        return (
+            "[FLUXO_PEDIDO] O pedido anterior ja foi finalizado recentemente. "
+            "Nao abra um novo pedido automaticamente nem cumprimente de novo. "
+            "Informe apenas que o pedido anterior ja foi concluido e pergunte se o cliente deseja iniciar um novo pedido."
+        )
+
+    if not has_cart_items:
+        return ""
+
+    if stage == FLOW_AWAITING_ADDRESS_CONFIRMATION:
+        if _is_affirmative_message(clean_message):
+            return (
+                "[FLUXO_PEDIDO] O cliente acabou de confirmar o endereco de entrega. "
+                "Nao pergunte mais sobre endereco. Pergunte somente a forma de pagamento."
+            )
+        if _is_payment_message(clean_message):
+            return (
+                "[FLUXO_PEDIDO] O cliente informou pagamento antes de confirmar o endereco. "
+                "Nao finalize ainda. Confirme primeiro o endereco de entrega."
+            )
+        return (
+            f"[FLUXO_PEDIDO] O pedido ja esta montado. Antes de falar de pagamento, confirme o endereco. "
+            f"Pergunte exatamente: Posso enviar para {customer_address}?"
+        )
+
+    if stage == FLOW_AWAITING_CUSTOMER_DETAILS:
+        if _looks_like_customer_details(clean_message):
+            return (
+                "[FLUXO_PEDIDO] O cliente possivelmente enviou nome e endereco. "
+                "Extraia esses dados, salve o endereco com salvar_endereco_tool, "
+                "e depois pergunte somente a forma de pagamento."
+            )
+        return (
+            "[FLUXO_PEDIDO] O pedido ja esta montado, mas nao finalize ainda. "
+            "Peca nome completo e endereco completo antes de perguntar pagamento."
+        )
+
+    if stage == FLOW_AWAITING_PAYMENT:
+        if _is_payment_message(clean_message):
+            return (
+                "[FLUXO_PEDIDO] A forma de pagamento ja foi informada neste turno. "
+                "Finalize agora usando finalizar_pedido_atual_tool com o carrinho atual. "
+                "Nao pergunte novamente endereco ou pagamento."
+            )
+        return (
+            "[FLUXO_PEDIDO] Endereco ja resolvido. Nao adicione novos cumprimentos. "
+            "Pergunte somente a forma de pagamento."
+        )
+
+    if _is_close_intent(clean_message):
+        if customer_address:
+            return (
+                f"[FLUXO_PEDIDO] O cliente sinalizou fechamento e ja possui endereco conhecido"
+                f"{' para ' + customer_name if customer_name else ''}. "
+                f"Nao finalize ainda. Confirme primeiro o endereco perguntando exatamente: Posso enviar para {customer_address}?"
+            )
+        return (
+            "[FLUXO_PEDIDO] O cliente sinalizou fechamento, mas ainda faltam dados cadastrais. "
+            "Nao pergunte pagamento ainda. Peca nome completo e endereco completo."
+        )
+
+    return ""
+
+
+def _sync_order_flow_state_from_response(phone: str, response: str) -> None:
+    low = _normalize_text_for_match(response)
+    next_stage = ""
+
+    if any(
+        marker in low
+        for marker in [
+            "pedido foi finalizado",
+            "pedido de numero",
+            "finalizado com sucesso",
+            "valor total oficial",
+        ]
+    ):
+        next_stage = FLOW_COMPLETED
+    elif "forma de pagamento" in low:
+        next_stage = FLOW_AWAITING_PAYMENT
+    elif "posso enviar para" in low:
+        next_stage = FLOW_AWAITING_ADDRESS_CONFIRMATION
+    elif ("nome completo" in low and "endereco completo" in low) or "qual o endereco" in low:
+        next_stage = FLOW_AWAITING_CUSTOMER_DETAILS
+    elif "deseja mais alguma coisa ou podemos finalizar" in low:
+        next_stage = FLOW_BUILDING
+
+    if next_stage:
+        set_order_flow_state(phone, next_stage)
 
 
 def _sanitize_premature_checkout(response: str, phone: str = None) -> str:
@@ -1123,6 +1435,7 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
         try:
             clear_cart(telefone)
             clear_order_session(telefone)
+            clear_order_flow_state(telefone)
             clear_pending_confirmations(telefone)
             clear_suggestions(telefone)
             start_order_session(telefone)
@@ -1138,6 +1451,37 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
             previous_messages = history_handler.messages
         except Exception as e:
             logger.error(f"Erro ao buscar histÃ³rico hÃ­brido: {e}")
+
+    current_cart_items = get_cart_items(telefone) or []
+    has_cart_items = len(current_cart_items) > 0
+    saved_address = str(get_saved_address(telefone) or "").strip()
+    cliente_data = None
+    nome_cli = ""
+    endereco_full = ""
+    total_ped = 0
+
+    try:
+        cliente_data = consultar_cliente(telefone)
+        if cliente_data and cliente_data.get("nome"):
+            nome_cli = str(cliente_data.get("nome", "") or "").strip()
+            endereco_full = _build_customer_address(cliente_data)
+            total_ped = int(cliente_data.get("total_pedidos", 0) or 0)
+            logger.info(f"ðŸ‘¤ Cliente cadastrado: {nome_cli} ({total_ped} pedidos)")
+    except Exception as e:
+        logger.warning(f"âš ï¸ Falha ao consultar cliente: {e}")
+        cliente_data = None
+
+    customer_address = saved_address or endereco_full
+    current_flow_state = "" if should_reset_context else (get_order_flow_state(telefone) or "")
+    active_flow_state = _advance_order_flow_state(
+        current_stage=current_flow_state,
+        clean_message=clean_message,
+        has_cart_items=has_cart_items,
+        customer_has_address=bool(customer_address),
+    )
+    if should_reset_context and not has_cart_items:
+        active_flow_state = FLOW_BUILDING
+    set_order_flow_state(telefone, active_flow_state)
 
     # 4) Persistir mensagem do usuÃ¡rio (sem tags internas de sessÃ£o).
     user_message_for_history = clean_message or incoming_message
@@ -1170,36 +1514,50 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
             contexto += "[INSTRUÃ‡ÃƒO_DE_ESTILO: cliente iniciou com pedido direto. FaÃ§a uma saudaÃ§Ã£o curta e natural (mÃ¡x 1 linha), depois responda objetivamente.]\n"
 
         # 5.1) Consultar dados cadastrados do cliente.
-        try:
-            from tools.http_tools import consultar_cliente
-            cliente_data = consultar_cliente(telefone)
-            if cliente_data and cliente_data.get("nome"):
-                nome_cli = cliente_data["nome"]
-                endereco_cli = cliente_data.get("endereco", "")
-                bairro_cli = cliente_data.get("bairro", "")
-                cidade_cli = cliente_data.get("cidade", "")
-                total_ped = cliente_data.get("total_pedidos", 0)
-                endereco_full = ", ".join(p for p in [endereco_cli, bairro_cli, cidade_cli] if p.strip())
-
-                if is_first_turn and is_new_order_session:
-                    contexto += f"[CLIENTE_CADASTRADO: {nome_cli} | EndereÃ§o: {endereco_full} | Pedidos anteriores: {total_ped}]\n[SESSÃƒO] Nova conversa.\n"
-                else:
-                    contexto += f"[DADOS DO CLIENTE PARA ENTREGA: {nome_cli} | EndereÃ§o: {endereco_full}]\n"
-
-                logger.info(f"ðŸ‘¤ Cliente cadastrado: {nome_cli} ({total_ped} pedidos)")
+        if cliente_data and nome_cli:
+            if is_first_turn and is_new_order_session:
+                contexto += f"[CLIENTE_CADASTRADO: {nome_cli} | EndereÃ§o: {endereco_full} | Pedidos anteriores: {total_ped}]\n[SESSÃƒO] Nova conversa.\n"
             else:
-                if is_first_turn and is_new_order_session:
-                    contexto += "[CLIENTE_NOVO: nÃ£o cadastrado]\n[SESSÃƒO] Nova conversa.\n"
-        except Exception as e:
-            logger.warning(f"âš ï¸ Falha ao consultar cliente: {e}")
+                contexto += f"[DADOS DO CLIENTE PARA ENTREGA: {nome_cli} | EndereÃ§o: {endereco_full}]\n"
+        else:
             if is_first_turn and is_new_order_session:
                 contexto += "[CLIENTE_NOVO: nÃ£o cadastrado]\n[SESSÃƒO] Nova conversa.\n"
+
+        flow_directive = _build_order_flow_directive(
+            stage=active_flow_state,
+            clean_message=clean_message,
+            has_cart_items=has_cart_items,
+            customer_name=nome_cli,
+            customer_address=customer_address,
+        )
+        if flow_directive:
+            contexto += f"{flow_directive}\n"
 
         # ExpansÃ£o de mensagens curtas.
         mensagem_expandida = clean_message
         msg_lower = (clean_message or "").lower().strip()
 
-        if msg_lower in ["sim", "s", "ok", "pode", "isso", "quero", "beleza", "blz", "bora", "vamos", "+", "++"]:
+        if current_flow_state == FLOW_AWAITING_ADDRESS_CONFIRMATION and _looks_like_customer_details(clean_message):
+            mensagem_expandida = (
+                f"O cliente enviou um novo endereco para entrega: '{clean_message}'. "
+                "Salve esse endereco com salvar_endereco_tool e depois pergunte somente a forma de pagamento."
+            )
+        elif active_flow_state == FLOW_AWAITING_ADDRESS_CONFIRMATION and _is_affirmative_message(clean_message):
+            mensagem_expandida = (
+                "O cliente confirmou o endereco de entrega. "
+                "Pergunte somente a forma de pagamento, sem nova saudacao."
+            )
+        elif active_flow_state == FLOW_AWAITING_PAYMENT and _is_payment_message(clean_message):
+            mensagem_expandida = (
+                f"O cliente informou a forma de pagamento '{clean_message}'. "
+                "Finalize agora usando finalizar_pedido_atual_tool e responda sem perguntar mais nada."
+            )
+        elif active_flow_state == FLOW_AWAITING_CUSTOMER_DETAILS and _looks_like_customer_details(clean_message):
+            mensagem_expandida = (
+                f"O cliente enviou estes dados cadastrais: '{clean_message}'. "
+                "Extraia nome e endereco, salve o endereco com salvar_endereco_tool e depois pergunte somente a forma de pagamento."
+            )
+        elif msg_lower in ["sim", "s", "ok", "pode", "isso", "quero", "beleza", "blz", "bora", "vamos", "+", "++"]:
             ultima_pergunta_ia = ""
             for msg in reversed(previous_messages):
                 if isinstance(msg, AIMessage) and msg.content:
@@ -1254,6 +1612,7 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
 
         output = _reconcile_estimated_total(output, telefone)
         output = _sanitize_out_of_context_followups(output)
+        _sync_order_flow_state_from_response(telefone, output)
 
         logger.info(f"âœ… [AGENT] Resposta: {output[:200]}...")
 

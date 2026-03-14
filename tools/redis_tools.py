@@ -564,6 +564,58 @@ def clear_order_session(telefone: str) -> bool:
         return False
 
 
+def order_flow_key(telefone: str) -> str:
+    """Chave do estágio atual do fluxo de pedido."""
+    return f"order_flow:{normalize_phone(telefone)}"
+
+
+def set_order_flow_state(telefone: str, stage: str, ttl_seconds: int = 7200) -> bool:
+    """Persiste o estágio atual do fluxo para orientar próximas respostas."""
+    client = get_redis_client()
+    telefone = normalize_phone(telefone)
+    if client is None:
+        return False
+
+    try:
+        client.set(order_flow_key(telefone), (stage or "").strip(), ex=max(60, int(ttl_seconds)))
+        logger.info(f"🔁 Fluxo do pedido atualizado para {telefone}: {stage}")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao salvar fluxo do pedido: {e}")
+        return False
+
+
+def get_order_flow_state(telefone: str) -> str:
+    """Recupera o estágio atual do fluxo de pedido."""
+    client = get_redis_client()
+    telefone = normalize_phone(telefone)
+    if client is None:
+        return ""
+
+    try:
+        value = client.get(order_flow_key(telefone))
+        return (value or "").strip()
+    except Exception as e:
+        logger.error(f"Erro ao recuperar fluxo do pedido: {e}")
+        return ""
+
+
+def clear_order_flow_state(telefone: str) -> bool:
+    """Remove o estágio atual do fluxo de pedido."""
+    client = get_redis_client()
+    telefone = normalize_phone(telefone)
+    if client is None:
+        return False
+
+    try:
+        client.delete(order_flow_key(telefone))
+        logger.info(f"🧹 Fluxo do pedido limpo para {telefone}")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao limpar fluxo do pedido: {e}")
+        return False
+
+
 def _normalize_text_for_intent(text: str) -> str:
     raw = (text or "").strip().lower()
     if not raw:
