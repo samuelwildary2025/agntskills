@@ -3,7 +3,11 @@ import json
 import unicodedata
 import difflib
 from tools.search_router import search_products
-from tools.product_lexicon import suggest_queries_from_lexicon
+from tools.product_resolver import (
+    apply_result_guards,
+    build_candidate_queries,
+    build_query_profile,
+)
 from pathlib import Path
 
 # Carregar aliases da skill normalizar_termos
@@ -142,7 +146,7 @@ def _needs_confirmation(items: list, original_query: str) -> tuple[bool, str]:
     top_name = _strip_accents((ranked[0].get("nome", "") or "").lower())
     requested_brand = _requested_brand(original_query)
     if requested_brand:
-        # Se a marca pedida aparece no topo, evitamos pedir confirmação por variação.
+        # Se a marca pedida aparece no topo, evitamos pedir confirmacao por variacao.
         if requested_brand in top_name:
             return False, ""
 
@@ -388,79 +392,16 @@ def buscar_e_validar(telefone: str, query: str) -> str:
     from config.logger import setup_logger
     logger = setup_logger(__name__)
 
-    # The LLM already processed the query contextually. We only normalize it using aliases
-    # for backwards compatibility.
-    query_original = (query or "").strip().lower()
-    for alias, canonical in ALIASES.items():
-        if alias in query_original:
-            query_original = query_original.replace(alias, canonical)
-
-    query_limpa = _simplify_query(query_original)
-    salient = _tokens_for_intent(query_original)
-    query_core = " ".join(salient[:2]) if len(salient) >= 2 else ""
-
-    q_norm_full = _strip_accents(query_original)
-    is_beef_strog_intent = bool(
-        re.search(r"\b(strogonoff|strogonof|estrogonoff|estrogonof)\b", q_norm_full)
-        and re.search(r"\b(carne|boi|bovina)\b", q_norm_full)
-    )
-
-    candidate_queries = []
-    if is_beef_strog_intent:
-        candidate_queries = ["strogonoff kg"]
-    else:
-        for candidate in [query_original, query_limpa, query_core]:
-            c = (candidate or "").strip()
-            if c and c.lower() not in {x.lower() for x in candidate_queries}:
-                candidate_queries.append(c)
-
-        # Fallback inteligente com léxico do relatório tratado (nomes reais do cadastro).
-        def _accept_lexicon_candidate(candidate_name: str) -> bool:
-            name_tokens = _tokens_for_intent(candidate_name)
-            salient_tokens = list(salient)
-            if not name_tokens or not salient_tokens:
-                return False
-
-            name_set = set(name_tokens)
-            salient_set = set(salient_tokens)
-            overlap = len(name_set & salient_set)
-            if len(salient_set) >= 2 and overlap < 2:
-                return False
-
-            first_tokens = set(name_tokens[:2])
-            if not (first_tokens & salient_set):
-                return False
-
-            noisy_object_tokens = {
-                "tapete",
-                "porta",
-                "suporte",
-                "organizador",
-                "cabide",
-                "prateleira",
-            }
-            if (name_set & noisy_object_tokens) and not (salient_set & noisy_object_tokens):
-                return False
-
-            return True
-
-        if len(salient) >= 2:
-            try:
-                lexicon_hits = suggest_queries_from_lexicon(query_original, limit=4, min_score=0.78)
-                for name, score in lexicon_hits:
-                    c = (name or "").strip()
-                    if not c or not _accept_lexicon_candidate(c):
-                        continue
-                    if c.lower() not in {x.lower() for x in candidate_queries}:
-                        candidate_queries.append(c)
-                        logger.info(f"Lexico sugeriu: '{query_original}' -> '{c}' (score={score:.2f})")
-            except Exception as e:
-                logger.warning(f"Falha no fallback do lexico para '{query_original}': {e}")
+    profile = build_query_profile(query, ALIASES)
+    query_original = profile.normalized_query
+    candidate_queries = build_candidate_queries(profile, logger=logger)
+    if not candidate_queries:
+        candidate_queries = [query_original or (query or "").strip().lower()]
 
     merged = {}
     for idx, cq in enumerate(candidate_queries[:6]):
         if idx > 0:
-            logger.info(f"🔄 Retry Busca Inteligente: '{query_original}' -> '{cq}'")
+            logger.info(f"Retry Busca Inteligente: '{query_original}' -> '{cq}'")
         _, rows = _run_search_for_item(cq, telefone)
         for row in rows:
             if not isinstance(row, dict):
@@ -476,7 +417,9 @@ def buscar_e_validar(telefone: str, query: str) -> str:
                     merged[key] = dict(row)
 
     resultados = list(merged.values())
+    resultados = apply_result_guards(resultados, profile)
     resultados = _semantic_rerank(resultados, query_original)
+    resultados = apply_result_guards(resultados, profile)
 
     q_norm = _strip_accents(query_original)
     if "pacote" in q_norm and "pao" in q_norm and resultados:
@@ -484,7 +427,7 @@ def buscar_e_validar(telefone: str, query: str) -> str:
         if packaged_only:
             resultados = packaged_only + [r for r in resultados if r not in packaged_only]
 
-    if is_beef_strog_intent and resultados:
+    if profile.is_beef_strog_intent and resultados:
         strog_results = []
         other_results = []
         for r in resultados:
@@ -503,13 +446,13 @@ def buscar_e_validar(telefone: str, query: str) -> str:
                 r["match_ok"] = False
             warning = {
                 "id": "AVISO_STROGONOFF_EXATO",
-                "nome": "⚠️ ITEM ESPECÍFICO NÃO LOCALIZADO",
+                "nome": "ITEM ESPECIFICO NAO LOCALIZADO",
                 "preco": 0.0,
                 "estoque": 0,
                 "match_ok": False,
                 "aviso": (
-                    "Para 'carne para strogonoff' eu só posso usar o item oficial 'STROGONOFF kg'. "
-                    "No momento ele não apareceu na busca."
+                    "Para 'carne para strogonoff' eu so posso usar o item oficial 'STROGONOFF kg'. "
+                    "No momento ele nao apareceu na busca."
                 ),
             }
             resultados = [warning] + other_results
@@ -519,25 +462,30 @@ def buscar_e_validar(telefone: str, query: str) -> str:
         categorias = set()
         for r in top_results:
             cat = r.get("categoria", "").upper()
-            if "LIMPEZA" in cat: cat = "LIMPEZA"
-            elif "HIGIENE" in cat: cat = "HIGIENE"
-            elif "BEBIDAS" in cat: cat = "BEBIDAS"
-            elif "AÇOUGUE" in cat or "CARNE" in cat: cat = "AÇOUGUE"
-            elif "HORTIFRUTI" in cat or "LEGUMES" in cat: cat = "HORTIFRUTI"
-            
+            if "LIMPEZA" in cat:
+                cat = "LIMPEZA"
+            elif "HIGIENE" in cat:
+                cat = "HIGIENE"
+            elif "BEBIDAS" in cat:
+                cat = "BEBIDAS"
+            elif "ACOUGUE" in cat or "CARNE" in cat:
+                cat = "ACOUGUE"
+            elif "HORTIFRUTI" in cat or "LEGUMES" in cat:
+                cat = "HORTIFRUTI"
+
             if cat:
                 categorias.add(cat)
-        
+
         if len(categorias) > 1 and "LIMPEZA" in categorias and "HIGIENE" in categorias:
-             warning = {
-                 "id": "AVISO_AMBIGUIDADE",
-                 "nome": "⚠️ AMBIGUIDADE DETECTADA",
-                 "preco": 0.0,
-                 "estoque": 0,
-                 "match_ok": False,
-                 "aviso": f"Encontrei produtos de categorias diferentes ({', '.join(categorias)}). PERGUNTE ao cliente qual ele deseja antes de adicionar."
-             }
-             resultados.insert(0, warning)
+            warning = {
+                "id": "AVISO_AMBIGUIDADE",
+                "nome": "AMBIGUIDADE DETECTADA",
+                "preco": 0.0,
+                "estoque": 0,
+                "match_ok": False,
+                "aviso": f"Encontrei produtos de categorias diferentes ({', '.join(categorias)}). PERGUNTE ao cliente qual ele deseja antes de adicionar.",
+            }
+            resultados.insert(0, warning)
 
         needs_confirm, motivo = _needs_confirmation(resultados, query)
         if needs_confirm:
@@ -546,19 +494,18 @@ def buscar_e_validar(telefone: str, query: str) -> str:
                     r["match_ok"] = False
             warning = {
                 "id": "AVISO_BAIXA_CONFIANCA",
-                "nome": "⚠️ CONFIRMAÇÃO NECESSÁRIA",
+                "nome": "CONFIRMACAO NECESSARIA",
                 "preco": 0.0,
                 "estoque": 0,
                 "match_ok": False,
-                "aviso": f"Busca com baixa confiança ({motivo}). Confirme com o cliente antes de adicionar.",
+                "aviso": f"Busca com baixa confianca ({motivo}). Confirme com o cliente antes de adicionar.",
             }
             if not any(isinstance(r, dict) and r.get("id") == "AVISO_BAIXA_CONFIANCA" for r in resultados):
                 resultados.insert(0, warning)
 
-        requested_brand = _requested_brand(query)
-        if requested_brand:
+        if profile.requested_brand:
             has_brand_hit = any(
-                requested_brand in _strip_accents((r.get("nome") or "").lower())
+                profile.requested_brand in _strip_accents((r.get("nome") or "").lower())
                 for r in resultados
                 if isinstance(r, dict)
             )
@@ -568,13 +515,13 @@ def buscar_e_validar(telefone: str, query: str) -> str:
                         r["match_ok"] = False
                 aviso_marca = {
                     "id": "AVISO_MARCA",
-                    "nome": "⚠️ MARCA NÃO LOCALIZADA",
+                    "nome": "MARCA NAO LOCALIZADA",
                     "preco": 0.0,
                     "estoque": 1.0,
                     "match_score": 0.0,
                     "match_ok": False,
                     "aviso": (
-                        f"O cliente pediu marca '{requested_brand}', mas os resultados não mostram essa marca no nome. "
+                        f"O cliente pediu marca '{profile.requested_brand}', mas os resultados nao mostram essa marca no nome. "
                         "Confirme com o cliente se aceita alternativa."
                     ),
                 }
